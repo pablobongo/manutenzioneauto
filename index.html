@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#D40000">
+<link rel="manifest" href="manifest.json">
+<title>AutoRigon</title>
+<style>
+
+  /* ==========================================================
+     RESET E VARIABILI
+     ========================================================== */
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  :root {
+    --bg-principale: #0A0A0A;
+    --card-grad-inizio: #1A1A1A;
+    --card-grad-fine: #141414;
+    --rosso-ferrari: #D40000;
+    --rosso-ferrari-scuro: #8C0000;
+    --testo-primario: #F5F5F5;
+    --testo-secondario: #9A9A9A;
+
+    --colore-libretto: #2A4D6E;
+    --colore-libretto-rgb: 42, 77, 110;
+    --colore-bollo: #6E5A2A;
+    --colore-bollo-rgb: 110, 90, 42;
+    --colore-manutenzioni: #3A6E4D;
+    --colore-manutenzioni-rgb: 58, 110, 77;
+    --colore-foto: #5A2A6E;
+    --colore-foto-rgb: 90, 42, 110;
+    --colore-note: #4A4A4A;
+    --colore-note-rgb: 74, 74, 74;
+    --rosso-ferrari-rgb: 212, 0, 0;
+
+    --font-sistema: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    overflow-x: hidden;
+    background: var(--bg-principale);
+    color: var(--testo-primario);
+    font-family: var(--font-sistema);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  h1, h2, h3, p, ul, ol, dl, dd, figure, form {
+    margin: 0;
+  }
+
+  ul { padding: 0; list-style: none; }
+
+  button, input, select, textarea {
+    font-family: inherit;
+    color: inherit;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  img, svg { max-width: 100%; display: block; }
+
+  .solo-lettori-schermo {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* ==========================================================
+     SPLASH SCREEN
+     ========================================================== */
+  .splash {
+    width: 100%;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--rosso-ferrari), var(--rosso-ferrari-scuro));
+  }
+
+  .splash[hidden] {
+    display: none;
+  }
+
+  .splash-illustrazione {
+    display: block;
+    width: 85%;
+    max-width: 85%;
+    height: auto;
+    object-fit: contain;
+  }
+
+  /* ==========================================================
+     APP SHELL
+     ========================================================== */
+  .app {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, var(--rosso-ferrari), var(--rosso-ferrari-scuro));
+  }
+
+  .app-header h1 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #FFFFFF;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .btn-icona {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.22);
+    color: #FFFFFF;
+    font-size: 1.5rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  main {
+    flex: 1;
+    width: 100%;
+    padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .sezione-pagina {
+    padding-top: 24px;
+  }
+
+  .sezione-pagina:first-child {
+    padding-top: 0;
+  }
+
+  .titolo-sezione-pagina {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--testo-primario);
+    margin-bottom: 12px;
+  }
+
+  .link-secondario {
+    display: inline-block;
+    font-size: 0.85rem;
+    color: var(--testo-secondario);
+    margin-bottom: 16px;
+  }
+
+  .divisore-anteprima {
+    border: none;
+    border-top: 1px dashed rgba(255, 255, 255, 0.12);
+    margin: 32px 0;
+  }
+
+  .nota-anteprima {
+    font-size: 0.75rem;
+    color: var(--testo-secondario);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 20px;
+  }
+
+  /* ==========================================================
+     GRIGLIA VEICOLI (HOME)
+     ========================================================== */
+  .griglia-veicoli {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .veicolo-card {
+    aspect-ratio: 1 / 1;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(160deg, var(--card-grad-inizio), var(--card-grad-fine));
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .veicolo-card .foto-copertina-placeholder {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--testo-secondario);
+  }
+
+  .veicolo-card .foto-copertina-placeholder svg {
+    width: 38%;
+    height: 38%;
+  }
+
+  .veicolo-card .nome-scheda {
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.28);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .veicolo-card .badge-stato {
+    position: relative;
+    top: 8px;
+    left: 8px;
+    align-self: flex-start;
+    margin: 8px 0 -32px 8px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(var(--rosso-ferrari-rgb), 0.25);
+    color: #FF8A8A;
+    border: 1px solid rgba(var(--rosso-ferrari-rgb), 0.5);
+  }
+
+  /* ==========================================================
+     CARD/SEZIONI SCHEDA VEICOLO
+     ========================================================== */
+  .scheda-veicolo-intestazione {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .scheda-veicolo-intestazione h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  .scheda-veicolo-intestazione .sottotitolo {
+    font-size: 0.8rem;
+    color: var(--testo-secondario);
+  }
+
+  .sezione-scheda {
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .sezione-scheda h3 {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sezione-standard {
+    background: linear-gradient(160deg, var(--card-grad-inizio), var(--card-grad-fine));
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .sezione-libretto {
+    border-left: 4px solid var(--colore-libretto);
+    background: rgba(var(--colore-libretto-rgb), 0.10);
+  }
+
+  .sezione-bollo {
+    border-left: 4px solid var(--colore-bollo);
+    background: rgba(var(--colore-bollo-rgb), 0.10);
+  }
+
+  .sec-ruote { border-left: 4px solid #37474F; background: rgba(55,74,79,0.10); }
+
+  .sec-bolletta-bollo { border-left: 4px solid #5A6E2A; background: rgba(90,110,42,0.10); }
+
+  .sezione-manutenzioni {
+    border-left: 4px solid var(--colore-manutenzioni);
+    background: rgba(var(--colore-manutenzioni-rgb), 0.10);
+  }
+
+  .sezione-foto {
+    border-left: 4px solid var(--colore-foto);
+    background: rgba(var(--colore-foto-rgb), 0.10);
+  }
+
+  .sezione-note {
+    border-left: 4px solid var(--colore-note);
+    background: rgba(var(--colore-note-rgb), 0.10);
+  }
+
+  /* Griglia etichetta / valore per dati anagrafici, km, proprietari */
+  .griglia-dati {
+    display: grid;
+    grid-template-columns: minmax(96px, 40%) 1fr;
+    gap: 8px 12px;
+  }
+
+  .griglia-dati dt {
+    font-size: 0.78rem;
+    color: var(--testo-secondario);
+  }
+
+  .griglia-dati dd {
+    font-size: 0.85rem;
+    color: var(--testo-primario);
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  .elenco-storico {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .elenco-storico .riga-storico {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.82rem;
+  }
+
+  .elenco-storico .riga-storico .valore-km {
+    font-weight: 600;
+  }
+
+  .elenco-storico .riga-storico .data-storico {
+    color: var(--testo-secondario);
+    white-space: nowrap;
+  }
+
+  .blocco-proprietario + .blocco-proprietario {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .blocco-proprietario .etichetta-proprietario {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--testo-secondario);
+    margin-bottom: 6px;
+  }
+
+  /* Libretto e bolletta bollo: placeholder documento */
+  .placeholder-documento {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .placeholder-documento svg {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    color: var(--testo-secondario);
+  }
+
+  .placeholder-documento span {
+    font-size: 0.8rem;
+    color: var(--testo-secondario);
+  }
+
+  /* Manutenzioni */
+  .elenco-manutenzioni {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .voce-manutenzione {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .voce-manutenzione .riga-titolo-badge {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .voce-manutenzione .descrizione {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .badge-tipo {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .badge-tipo.ordinaria {
+    background: rgba(var(--colore-manutenzioni-rgb), 0.25);
+    color: #A9E4BE;
+    border: 1px solid var(--colore-manutenzioni);
+  }
+
+  .badge-tipo.straordinaria {
+    background: rgba(var(--rosso-ferrari-rgb), 0.22);
+    color: #FFA9A9;
+    border: 1px solid var(--rosso-ferrari);
+  }
+
+  .voce-manutenzione .dettagli-manutenzione {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 0.78rem;
+    color: var(--testo-secondario);
+  }
+
+  .voce-manutenzione .dettagli-manutenzione strong {
+    color: var(--testo-primario);
+    font-weight: 600;
+  }
+
+  /* Ruote */
+  .elenco-ruote {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .voce-ruota {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .voce-ruota .marchio-ruota {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .badge-tipo.dimensioni {
+    background: rgba(55, 74, 79, 0.25);
+    color: #B7C6CB;
+    border: 1px solid #37474F;
+  }
+
+  .voce-ruota .dettagli-ruota {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 0.78rem;
+    color: var(--testo-secondario);
+  }
+
+  .voce-ruota .dettagli-ruota strong {
+    color: var(--testo-primario);
+    font-weight: 600;
+  }
+
+  /* Foto */
+  .griglia-foto {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .foto-placeholder-quadrata {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--testo-secondario);
+  }
+
+  .foto-placeholder-quadrata svg {
+    width: 34%;
+    height: 34%;
+  }
+
+  .foto-placeholder-quadrata .etichetta-copertina {
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    font-size: 0.6rem;
+    text-align: center;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #FFFFFF;
+    background: rgba(var(--rosso-ferrari-rgb), 0.75);
+    border-radius: 4px;
+    padding: 2px 0;
+  }
+
+  /* Note */
+  .sezione-note p {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--testo-primario);
+  }
+
+  /* ==========================================================
+     FORM DI ESEMPIO / PULSANTE PRIMARIO
+     ========================================================== */
+  .form-esempio {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .campo-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .campo-form label {
+    font-size: 0.78rem;
+    color: var(--testo-secondario);
+  }
+
+  .campo-form input,
+  .campo-form select,
+  .campo-form textarea {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+    color: var(--testo-primario);
+  }
+
+  .campo-form input::placeholder {
+    color: var(--testo-secondario);
+  }
+
+  .riga-doppia-colonna {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .btn-primario {
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #FFFFFF;
+    background: linear-gradient(135deg, var(--rosso-ferrari), var(--rosso-ferrari-scuro));
+    cursor: pointer;
+    margin-top: 6px;
+  }
+
+  /* ==========================================================
+     FOOTER NAVIGAZIONE
+     ========================================================== */
+  .footer-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    background: #101010;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .footer-nav a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 4px 8px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--testo-secondario);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .footer-nav a svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .footer-nav a.attivo {
+    color: var(--rosso-ferrari);
+  }
+
+  /* ==========================================================
+     RESPONSIVE — verificato a 320px e 390px di larghezza
+     ========================================================== */
+  @media (max-width: 340px) {
+    .app-header h1 {
+      font-size: 1.15rem;
+    }
+
+    .griglia-dati {
+      grid-template-columns: 1fr;
+    }
+
+    .griglia-dati dd {
+      margin-bottom: 2px;
+    }
+
+    .riga-doppia-colonna {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* ==========================================================
+     FASE 2B — STATI DINAMICI, MENU, TOAST, FORM RIGHE
+     ========================================================== */
+  .app-header h1 {
+    cursor: pointer;
+  }
+
+  .stato-vuoto {
+    text-align: center;
+    padding: 40px 16px;
+    color: var(--testo-secondario);
+    font-size: 0.85rem;
+  }
+
+  .veicolo-card {
+    position: relative;
+  }
+
+  .pallino-avviso {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--rosso-ferrari);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Banner scadenze */
+  .banner-scadenze {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(var(--rosso-ferrari-rgb), 0.12);
+    border: 1px solid rgba(var(--rosso-ferrari-rgb), 0.4);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+  }
+
+  .banner-scadenze .banner-titolo {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #FF8A8A;
+  }
+
+  .banner-scadenze ul {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .banner-scadenze li {
+    font-size: 0.78rem;
+    color: var(--testo-primario);
+  }
+
+  .banner-scadenze li .giorni-scadenza {
+    color: #FFA9A9;
+    font-weight: 600;
+  }
+
+  /* Toast di feedback */
+  .toast-container {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .toast {
+    pointer-events: auto;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #FFFFFF;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  }
+
+  .toast.successo {
+    background: linear-gradient(135deg, var(--colore-manutenzioni), #244A32);
+  }
+
+  .toast.errore {
+    background: linear-gradient(135deg, var(--rosso-ferrari), var(--rosso-ferrari-scuro));
+  }
+
+  .toast.info {
+    background: #262626;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  /* Menu contestuale a foglio inferiore */
+  .overlay-modale {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 70;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .overlay-modale[hidden] {
+    display: none;
+  }
+
+  .foglio-modale {
+    width: 100%;
+    max-width: 480px;
+    background: #151515;
+    border-radius: 16px 16px 0 0;
+    padding: 4px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: none;
+  }
+
+  .foglio-modale .titolo-foglio {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--testo-secondario);
+    text-align: center;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .foglio-modale button.voce-menu {
+    display: block;
+    width: 100%;
+    text-align: center;
+    background: none;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 15px 20px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--testo-primario);
+  }
+
+  .foglio-modale button.voce-menu:last-of-type {
+    border-bottom: none;
+  }
+
+  .foglio-modale button.voce-menu:disabled {
+    color: var(--testo-secondario);
+    opacity: 0.5;
+  }
+
+  .foglio-modale button.voce-menu.pericolo {
+    color: #FF8A8A;
+  }
+
+  /* Chip selezione veicoli (statistiche) */
+  .chip-selezione {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .chip-selezione button {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--testo-secondario);
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+  }
+
+  .chip-selezione button.selezionato {
+    background: rgba(var(--rosso-ferrari-rgb), 0.2);
+    border-color: var(--rosso-ferrari);
+    color: #FF8A8A;
+  }
+
+  .riga-range-date {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .riga-range-date .campo-form {
+    flex: 1;
+  }
+
+  .riepilogo-statistiche-veicolo {
+    margin-bottom: 22px;
+  }
+
+  .riepilogo-statistiche-veicolo h4 {
+    font-size: 0.88rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .riepilogo-costo-totale {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--testo-primario);
+    margin-bottom: 10px;
+  }
+
+  .canvas-grafico {
+    width: 100%;
+    height: 160px;
+    display: block;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+  }
+
+  .legenda-grafico {
+    display: flex;
+    gap: 14px;
+    margin-top: 8px;
+    font-size: 0.72rem;
+    color: var(--testo-secondario);
+  }
+
+  .legenda-grafico .voce-legenda {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legenda-grafico .pallino-legenda {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .testo-dati-insufficienti {
+    font-size: 0.78rem;
+    color: var(--testo-secondario);
+    padding: 18px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+  }
+
+  /* Form mini per aggiunta/modifica riga (km, proprietari, manutenzioni, ruote, rifornimenti) */
+  .form-riga-mini {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.16);
+    border: 1px dashed rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 10px;
+  }
+
+  .form-riga-mini .campo-form input,
+  .form-riga-mini .campo-form select {
+    padding: 8px 10px;
+    font-size: 0.82rem;
+  }
+
+  .form-riga-mini .campo-form label {
+    font-size: 0.7rem;
+  }
+
+  .errore-campo {
+    font-size: 0.7rem;
+    color: #FFA9A9;
+    display: none;
+  }
+
+  .errore-campo.visibile {
+    display: block;
+  }
+
+  .riga-azioni-mini {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .btn-secondario-piccolo {
+    flex: 1;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: var(--testo-primario);
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .btn-primario-piccolo {
+    flex: 1;
+    border: none;
+    background: linear-gradient(135deg, var(--rosso-ferrari), var(--rosso-ferrari-scuro));
+    color: #FFFFFF;
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .riga-con-elimina {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .btn-elimina-riga {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--testo-secondario);
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 0 2px;
+  }
+
+  .btn-elimina-riga:active {
+    color: var(--rosso-ferrari);
+  }
+
+  .riga-cliccabile {
+    cursor: pointer;
+  }
+
+  .btn-aggiungi-riga {
+    margin-top: 10px;
+    width: 100%;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    background: transparent;
+    color: var(--testo-secondario);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  /* Foto: tile di upload + anteprima reale */
+  .foto-placeholder-quadrata.tile-aggiungi {
+    border-style: dashed;
+    color: var(--testo-secondario);
+    font-size: 1.8rem;
+    cursor: pointer;
+  }
+
+  .foto-placeholder-quadrata img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+  }
+
+  /* Impostazioni */
+  .riga-impostazione {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .riga-impostazione:last-child {
+    border-bottom: none;
+  }
+
+  .riga-impostazione .etichetta {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .riga-impostazione .valore-secondario {
+    font-size: 0.76rem;
+    color: var(--testo-secondario);
+  }
+
+  .btn-testo-pericolo {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: #FF8A8A;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  /* Sezione form campo con errore inline */
+  .campo-form .errore-campo {
+    margin-top: -2px;
+  }
+
+  .campo-form.con-errore input,
+  .campo-form.con-errore select {
+    border-color: var(--rosso-ferrari);
+  }
+
+</style>
+</head>
+<body>
+
+  <!-- ==========================================================
+       SPLASH SCREEN (placeholder logo)
+       ========================================================== -->
+  <div class="splash" role="img" aria-label="AutoRigon">
+    <img src="assets/auto-splash.svg" alt="" class="splash-illustrazione">
+  </div>
+
+  <!-- Icone SVG condivise, riutilizzate via <use> -->
+  <svg style="position:absolute; width:0; height:0; overflow:hidden;" aria-hidden="true">
+    <symbol id="icona-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13l1.6-4.8A2 2 0 0 1 6.5 7h11a2 2 0 0 1 1.9 1.2L21 13"/>
+      <path d="M3 13h18v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4z"/>
+      <circle cx="7" cy="17.5" r="1.2"/>
+      <circle cx="17" cy="17.5" r="1.2"/>
+    </symbol>
+    <symbol id="icona-documento" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+      <path d="M14 3v4h4"/>
+      <path d="M9 12h6M9 16h6"/>
+    </symbol>
+    <symbol id="icona-foto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2"/>
+      <circle cx="9" cy="11" r="2.2"/>
+      <path d="M21 17l-5.5-5.5a1.5 1.5 0 0 0-2.1 0L6 19"/>
+    </symbol>
+    <symbol id="icona-archivio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="5" rx="1"/>
+      <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/>
+      <path d="M10 13h4"/>
+    </symbol>
+    <symbol id="icona-statistiche" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 20V10M12 20V4M20 20v-7"/>
+    </symbol>
+    <symbol id="icona-impostazioni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 13.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/>
+    </symbol>
+  </svg>
+
+  <div class="app">
+
+    <!-- ==========================================================
+         HEADER
+         ========================================================== -->
+    <header class="app-header">
+      <h1 id="titolo-app">AutoRigon</h1>
+      <a class="btn-icona" href="#dettaglio-veicolo" id="btn-nuovo-veicolo" aria-label="Aggiungi veicolo">+</a>
+    </header>
+
+    <main>
+
+      <!-- ==========================================================
+           HOME — GRIGLIA VEICOLI
+           ========================================================== -->
+      <section id="home" data-vista="home" class="sezione-pagina">
+        <h2 class="titolo-sezione-pagina">I tuoi veicoli</h2>
+
+        <div id="banner-scadenze" class="banner-scadenze" hidden>
+          <p class="banner-titolo">⚠ Scadenze imminenti</p>
+          <ul id="lista-scadenze"></ul>
+        </div>
+
+        <div class="griglia-veicoli" id="griglia-veicoli-home"></div>
+        <p class="stato-vuoto" id="stato-vuoto-home" hidden>Nessun veicolo attivo. Tocca "+" per aggiungerne uno.</p>
+      </section>
+
+      <!-- ==========================================================
+           ARCHIVIO
+           ========================================================== -->
+      <section id="archivio" data-vista="archivio" class="sezione-pagina" hidden>
+        <h2 class="titolo-sezione-pagina">Archivio</h2>
+        <div class="griglia-veicoli" id="griglia-veicoli-archivio"></div>
+        <p class="stato-vuoto" id="stato-vuoto-archivio" hidden>Nessun veicolo archiviato.</p>
+      </section>
+
+      <!-- ==========================================================
+           STATISTICHE
+           ========================================================== -->
+      <section id="statistiche" data-vista="statistiche" class="sezione-pagina" hidden>
+        <h2 class="titolo-sezione-pagina">Statistiche</h2>
+        <div class="chip-selezione" id="chip-selezione-veicoli"></div>
+        <div class="riga-range-date">
+          <div class="campo-form">
+            <label for="stat-data-da">Dal</label>
+            <input type="date" id="stat-data-da">
+          </div>
+          <div class="campo-form">
+            <label for="stat-data-a">Al</label>
+            <input type="date" id="stat-data-a">
+          </div>
+        </div>
+        <p class="stato-vuoto" id="stato-vuoto-statistiche" hidden>Nessun veicolo disponibile per le statistiche.</p>
+        <p class="nota-anteprima" id="nota-selezione-statistiche" hidden>Seleziona almeno un veicolo per vedere le statistiche.</p>
+        <div id="contenitore-statistiche"></div>
+      </section>
+
+      <!-- ==========================================================
+           IMPOSTAZIONI
+           ========================================================== -->
+      <section id="impostazioni" data-vista="impostazioni" class="sezione-pagina" hidden>
+        <h2 class="titolo-sezione-pagina">Impostazioni</h2>
+        <div class="sezione-scheda sezione-standard">
+          <div class="riga-impostazione">
+            <div>
+              <p class="etichetta">Backup dati</p>
+              <p class="valore-secondario">Esporta un file di backup completo (dati + foto)</p>
+              <p class="valore-secondario" id="valore-ultimo-backup">Nessun backup ancora effettuato</p>
+            </div>
+            <button class="btn-secondario-piccolo" id="btn-backup" type="button">Esporta</button>
+          </div>
+          <div class="riga-impostazione">
+            <div>
+              <p class="etichetta">Ripristino dati</p>
+              <p class="valore-secondario">Importa da un file di backup</p>
+            </div>
+            <button class="btn-secondario-piccolo" id="btn-ripristino" type="button">Importa</button>
+          </div>
+          <div class="riga-impostazione">
+            <div>
+              <p class="etichetta">Versione app</p>
+              <p class="valore-secondario" id="valore-versione-app">—</p>
+            </div>
+          </div>
+          <div class="riga-impostazione">
+            <div>
+              <p class="etichetta">Reset totale dati</p>
+              <p class="valore-secondario">Elimina definitivamente tutti i veicoli salvati</p>
+            </div>
+            <button class="btn-testo-pericolo" id="btn-reset-totale" type="button">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================================
+           VISTA DETTAGLIO / FORM VEICOLO (nuovo o esistente)
+           ========================================================== -->
+      <section id="dettaglio-veicolo" data-vista="dettaglioVeicolo" class="sezione-pagina" hidden>
+        <a class="link-secondario" href="#home" id="link-torna-home">‹ Torna alla home</a>
+
+        <div class="scheda-veicolo-intestazione">
+          <h2 id="dettaglio-titolo">Nuovo veicolo</h2>
+          <span class="sottotitolo" id="dettaglio-sottotitolo"></span>
+        </div>
+
+        <div id="dettaglio-contenuto"></div>
+      </section>
+
+    </main>
+
+    <!-- ==========================================================
+         FOOTER NAVIGAZIONE
+         ========================================================== -->
+    <nav class="footer-nav" aria-label="Navigazione principale">
+      <a href="#archivio" data-vista-link="archivio">
+        <svg aria-hidden="true"><use href="#icona-archivio"></use></svg>
+        Archivio
+      </a>
+      <a href="#statistiche" data-vista-link="statistiche">
+        <svg aria-hidden="true"><use href="#icona-statistiche"></use></svg>
+        Statistiche
+      </a>
+      <a href="#impostazioni" data-vista-link="impostazioni">
+        <svg aria-hidden="true"><use href="#icona-impostazioni"></use></svg>
+        Impostazioni
+      </a>
+    </nav>
+
+  </div>
+
+  <!-- Contenitore toast di feedback -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <!-- Menu contestuale a foglio inferiore (long-press, azioni) -->
+  <div class="overlay-modale" id="overlay-menu-contestuale" hidden>
+    <div class="foglio-modale" id="foglio-menu-contestuale"></div>
+  </div>
+
+  <!-- Input file nascosti per upload foto -->
+  <input type="file" id="input-upload-foto" accept="image/*" multiple hidden>
+  <input type="file" id="input-upload-libretto" accept="image/*" hidden>
+  <input type="file" id="input-upload-bolletta-bollo" accept="image/*" hidden>
+  <input type="file" id="input-ripristino-backup" accept="application/json,.json" hidden>
+
+  <script src="vendor/jspdf/jspdf.umd.min.js"></script>
+  <script src="db.js"></script>
+  <script src="logica.js"></script>
+  <script>
+    /**
+     * Registra il Service Worker per il supporto PWA offline. Richiede un contesto
+     * sicuro (HTTPS o localhost): su file:// o browser senza supporto, fallisce in
+     * modo silenzioso (solo log), senza mai bloccare l'uso dell'app.
+     */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then((registrazione) => {
+          console.log('Service Worker registrato con scope:', registrazione.scope);
+        }).catch((errore) => {
+          console.warn('Registrazione Service Worker non riuscita (non blocca l\'app):', errore);
+        });
+      });
+    } else {
+      console.warn('Service Worker non supportato in questo browser: PWA offline non disponibile.');
+    }
+  </script>
+</body>
+</html>

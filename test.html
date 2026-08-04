@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoRigon — Test db.js</title>
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 20px auto; padding: 0 12px; }
+  h1 { font-size: 1.3rem; }
+  section { border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+  section h2 { margin-top: 0; font-size: 1rem; }
+  button { margin: 4px 4px 4px 0; padding: 6px 10px; cursor: pointer; }
+  input { margin: 2px 4px 2px 0; padding: 4px; }
+  label { display: inline-block; min-width: 90px; font-size: 0.85rem; }
+  .row { margin-bottom: 6px; }
+  #log { background: #111; color: #0f0; font-family: monospace; font-size: 0.8rem; padding: 10px; height: 320px; overflow-y: auto; white-space: pre-wrap; border-radius: 6px; }
+  .btn-clear { background: #eee; }
+</style>
+</head>
+<body>
+
+<h1>AutoRigon — Pagina di test db.js</h1>
+<p>Ogni pulsante richiama una funzione di <code>DB</code> e stampa il risultato nel log sottostante, senza bisogno di aprire la console DevTools.</p>
+
+<section>
+  <h2>Inizializzazione</h2>
+  <button onclick="testInit()">DB.init()</button>
+</section>
+
+<section>
+  <h2>Lettura veicoli</h2>
+  <button onclick="testGetVeicoli('attivo')">DB.getVeicoli('attivo')</button>
+  <button onclick="testGetVeicoli('archiviato')">DB.getVeicoli('archiviato')</button>
+  <div class="row">
+    <label>id veicolo</label>
+    <input type="text" id="inputGetId" placeholder="veicolo_1699999999999">
+    <button onclick="testGetVeicolo()">DB.getVeicolo(id)</button>
+  </div>
+</section>
+
+<section>
+  <h2>Crea / aggiorna veicolo</h2>
+  <div class="row">
+    <label>nomeScheda</label>
+    <input type="text" id="inputNome" placeholder="La mia auto">
+  </div>
+  <div class="row">
+    <label>marca</label>
+    <input type="text" id="inputMarca" placeholder="Fiat">
+    <label>modello</label>
+    <input type="text" id="inputModello" placeholder="Panda">
+  </div>
+  <div class="row">
+    <label>id (per update)</label>
+    <input type="text" id="inputSalvaId" placeholder="lascia vuoto per crearne uno nuovo">
+  </div>
+  <button onclick="testSalvaVeicolo()">DB.salvaVeicolo(oggetto)</button>
+</section>
+
+<section>
+  <h2>Cambia stato / elimina</h2>
+  <div class="row">
+    <label>id veicolo</label>
+    <input type="text" id="inputStatoId" placeholder="veicolo_1699999999999">
+    <select id="inputNuovoStato">
+      <option value="attivo">attivo</option>
+      <option value="archiviato">archiviato</option>
+    </select>
+    <button onclick="testCambiaStato()">DB.cambiaStato(id, stato)</button>
+  </div>
+  <div class="row">
+    <label>id veicolo</label>
+    <input type="text" id="inputEliminaId" placeholder="veicolo_1699999999999">
+    <button onclick="testEliminaVeicolo()">DB.eliminaVeicolo(id)</button>
+  </div>
+</section>
+
+<section>
+  <h2>Impostazioni</h2>
+  <div class="row">
+    <label>chiave</label>
+    <input type="text" id="inputImpChiave" placeholder="ultimoBackup">
+    <label>valore</label>
+    <input type="text" id="inputImpValore" placeholder="2026-08-03">
+    <button onclick="testSetImpostazione()">DB.setImpostazione(chiave, valore)</button>
+  </div>
+  <div class="row">
+    <label>chiave</label>
+    <input type="text" id="inputImpChiaveGet" placeholder="ultimoBackup">
+    <button onclick="testGetImpostazione()">DB.getImpostazione(chiave)</button>
+  </div>
+</section>
+
+<section>
+  <h2>Test errore quota (simulato)</h2>
+  <button onclick="testQuotaErrore()">Simula QuotaExceededError</button>
+</section>
+
+<section>
+  <h2>Diagnostica schema/dati</h2>
+  <p style="font-size:0.8rem;margin:4px 0;">Mostra versione DB, keyPath/unique dell'indice "stato" e il valore esatto (JSON) del campo "stato" di ogni veicolo salvato — utile per individuare mismatch di maiuscole/spazi o indici corrotti senza aprire DevTools.</p>
+  <button onclick="testDiagnostica()">Verifica schema e dati</button>
+</section>
+
+<div class="row">
+  <button class="btn-clear" onclick="clearLog()">Pulisci log</button>
+</div>
+<div id="log"></div>
+
+<script src="db.js"></script>
+<script>
+  const logEl = document.getElementById('log');
+
+  function log(titolo, dato) {
+    const timestamp = new Date().toLocaleTimeString();
+    const testo = typeof dato === 'string' ? dato : JSON.stringify(dato, null, 2);
+    logEl.textContent += `[${timestamp}] ${titolo}\n${testo}\n\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function logErrore(titolo, err) {
+    logEl.textContent += `[${new Date().toLocaleTimeString()}] ERRORE in ${titolo}\n${err.message}\n\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function clearLog() {
+    logEl.textContent = '';
+  }
+
+  function testInit() {
+    DB.init()
+      .then(() => log('DB.init()', 'Database aperto correttamente.'))
+      .catch((err) => logErrore('DB.init()', err));
+  }
+
+  function testGetVeicoli(stato) {
+    DB.getVeicoli(stato)
+      .then((lista) => log(`DB.getVeicoli('${stato}')`, lista))
+      .catch((err) => logErrore('DB.getVeicoli()', err));
+  }
+
+  function testGetVeicolo() {
+    const id = document.getElementById('inputGetId').value.trim();
+    DB.getVeicolo(id)
+      .then((veicolo) => log(`DB.getVeicolo('${id}')`, veicolo))
+      .catch((err) => logErrore('DB.getVeicolo()', err));
+  }
+
+  function creaVeicoloVuoto() {
+    return {
+      id: 'veicolo_' + Date.now(),
+      stato: 'attivo',
+      nomeScheda: '', marca: '', modello: '', allestimento: '', colore: '',
+      cilindrata: null, potenza: null, targa: '', annoPrimaImmatricolazione: null,
+      kmAcquisto: null, kmAttuale: null, dataKmAttuale: null,
+      storicoKm: [],
+      storicoProprietariPrecedenti: [],
+      proprietarioAttuale: { nome: '', annoImmatricolazione: null },
+      bollo: { scadenza: null, costo: null },
+      assicurazione: { costo: null, scadenza: null, rinnovoMensile: false },
+      libretto: { fotoId: null },
+      bollettaBollo: { fotoId: null },
+      manutenzioni: [],
+      foto: [],
+      note: ''
+    };
+  }
+
+  function testSalvaVeicolo() {
+    const idEsistente = document.getElementById('inputSalvaId').value.trim();
+    const nome = document.getElementById('inputNome').value.trim();
+    const marca = document.getElementById('inputMarca').value.trim();
+    const modello = document.getElementById('inputModello').value.trim();
+
+    const procedi = (veicolo) => {
+      veicolo.nomeScheda = nome;
+      veicolo.marca = marca;
+      veicolo.modello = modello;
+      DB.salvaVeicolo(veicolo)
+        .then((id) => log('DB.salvaVeicolo(oggetto)', `Salvato con id: ${id}`))
+        .catch((err) => logErrore('DB.salvaVeicolo()', err));
+    };
+
+    if (idEsistente) {
+      DB.getVeicolo(idEsistente).then((v) => {
+        procedi(v || Object.assign(creaVeicoloVuoto(), { id: idEsistente }));
+      }).catch((err) => logErrore('DB.salvaVeicolo() [lettura preliminare]', err));
+    } else {
+      procedi(creaVeicoloVuoto());
+    }
+  }
+
+  function testCambiaStato() {
+    const id = document.getElementById('inputStatoId').value.trim();
+    const nuovoStato = document.getElementById('inputNuovoStato').value;
+    DB.cambiaStato(id, nuovoStato)
+      .then(() => log('DB.cambiaStato(id, stato)', `Stato aggiornato a "${nuovoStato}" per ${id}`))
+      .catch((err) => logErrore('DB.cambiaStato()', err));
+  }
+
+  function testEliminaVeicolo() {
+    const id = document.getElementById('inputEliminaId').value.trim();
+    DB.eliminaVeicolo(id)
+      .then(() => log('DB.eliminaVeicolo(id)', `Veicolo ${id} eliminato.`))
+      .catch((err) => logErrore('DB.eliminaVeicolo()', err));
+  }
+
+  function testSetImpostazione() {
+    const chiave = document.getElementById('inputImpChiave').value.trim();
+    const valore = document.getElementById('inputImpValore').value;
+    DB.setImpostazione(chiave, valore)
+      .then(() => log('DB.setImpostazione(chiave, valore)', `Impostazione "${chiave}" salvata.`))
+      .catch((err) => logErrore('DB.setImpostazione()', err));
+  }
+
+  function testGetImpostazione() {
+    const chiave = document.getElementById('inputImpChiaveGet').value.trim();
+    DB.getImpostazione(chiave)
+      .then((valore) => log(`DB.getImpostazione('${chiave}')`, valore))
+      .catch((err) => logErrore('DB.getImpostazione()', err));
+  }
+
+  function testQuotaErrore() {
+    log('Simula QuotaExceededError', 'Genera un dato molto grande e prova a salvarlo ripetutamente per esaurire lo storage (puo\' richiedere tempo/molto spazio a seconda del browser).');
+    const veicoloGrande = creaVeicoloVuoto();
+    veicoloGrande.note = 'x'.repeat(1024 * 1024 * 50); // ~50MB di testo
+    DB.salvaVeicolo(veicoloGrande)
+      .then((id) => log('Simula QuotaExceededError', `Salvato senza errore (quota non ancora superata): ${id}`))
+      .catch((err) => logErrore('Simula QuotaExceededError', err));
+  }
+
+  function testDiagnostica() {
+    DB.init().then((db) => {
+      const info = { versioneDB: db.version, storeNames: Array.from(db.objectStoreNames) };
+      const tx = db.transaction('veicoli', 'readonly');
+      const store = tx.objectStore('veicoli');
+      info.indiciVeicoli = Array.from(store.indexNames);
+      if (store.indexNames.contains('stato')) {
+        const idx = store.index('stato');
+        info.indiceStato = { keyPath: idx.keyPath, unique: idx.unique };
+      }
+      const request = store.getAll();
+      request.onsuccess = () => {
+        info.record = request.result.map((r) => ({
+          id: r.id,
+          statoEsatto: JSON.stringify(r.stato)
+        }));
+        log('Diagnostica schema/dati', info);
+      };
+      request.onerror = (event) => logErrore('Diagnostica schema/dati', event.target.error);
+    }).catch((err) => logErrore('Diagnostica schema/dati', err));
+  }
+
+  window.addEventListener('load', testInit);
+</script>
+
+</body>
+</html>
