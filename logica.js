@@ -24,6 +24,9 @@ const VERSIONE_APP = '1.0.0';
 /** Veicolo attualmente aperto nella vista dettaglio/form (nuovo o esistente). */
 let veicoloCorrente = null;
 
+/** true se il form dettaglio ha modifiche non ancora salvate (input dell'utente dall'ultimo salvataggio). */
+let formSporco = false;
+
 /** Stato selezione/filtri della vista Statistiche (non fa parte di AppState). */
 let statisticheInizializzate = false;
 let statisticheVeicoliTutti = [];
@@ -223,6 +226,9 @@ function trovaFoto(v, id) {
    NAVIGAZIONE / VISTE (5.1, 5.2, 5.4, 5.12, 5.13)
    ========================================================== */
 
+/** Durata dello splash screen prima di passare automaticamente alla Home (ms). */
+const DURATA_SPLASH_MS = 5000;
+
 /** Avvia l'app: apre il DB, mostra Home dopo lo splash o un errore se init fallisce. */
 function avviaApp() {
   DB.init().then(() => {
@@ -230,7 +236,7 @@ function avviaApp() {
       const splash = document.querySelector('.splash');
       if (splash) splash.hidden = true;
       mostraVista('home');
-    }, 1300);
+    }, DURATA_SPLASH_MS);
   }).catch((err) => {
     const splash = document.querySelector('.splash');
     if (splash) {
@@ -542,6 +548,7 @@ function apriDettaglio(id) {
   AppState.veicoloSelezionatoId = id;
   if (id === null) {
     veicoloCorrente = creaVeicoloVuoto();
+    formSporco = false;
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
     return;
@@ -549,6 +556,7 @@ function apriDettaglio(id) {
   DB.getVeicolo(id).then((v) => {
     if (!v) { mostraToast('Veicolo non trovato', 'errore'); mostraVista('home'); return; }
     veicoloCorrente = normalizzaVeicolo(v);
+    formSporco = false;
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
   }).catch((err) => mostraToast(err.message || 'Errore nel caricamento del veicolo', 'errore'));
@@ -558,6 +566,7 @@ function apriDettaglio(id) {
 function persistiVeicoloCorrente(messaggioSuccesso) {
   DB.salvaVeicolo(veicoloCorrente).then(() => {
     AppState.veicoloSelezionatoId = veicoloCorrente.id;
+    formSporco = false;
     mostraToast(messaggioSuccesso, 'successo');
     aggiornaTestataDettaglio();
   }).catch((err) => {
@@ -1919,14 +1928,31 @@ function gestisciResetTotale() {
    INIZIALIZZAZIONE / WIRING GLOBALE
    ========================================================== */
 
+/**
+ * Naviga alla Home da qualsiasi vista. Se si è nel form dettaglio/modifica veicolo
+ * con modifiche non salvate, chiede conferma esplicita prima di uscire (nessun
+ * autosalvataggio: confermando, le modifiche pendenti vengono perse).
+ */
+function gestisciNavigazioneHome() {
+  if (AppState.vistaCorrente === 'dettaglioVeicolo' && formSporco) {
+    if (!confermaAzione('Ci sono modifiche non salvate. Uscire comunque?')) return;
+  }
+  formSporco = false;
+  mostraVista('home');
+}
+
 /** Collega tutti i gestori di eventi globali (header, footer, menu, upload, impostazioni). */
 function inizializzaGestoriGlobali() {
-  document.getElementById('titolo-app').addEventListener('click', () => mostraVista('home'));
+  document.getElementById('titolo-app').addEventListener('click', () => gestisciNavigazioneHome());
   document.getElementById('btn-nuovo-veicolo').addEventListener('click', (e) => { e.preventDefault(); apriDettaglio(null); });
-  document.getElementById('link-torna-home').addEventListener('click', (e) => { e.preventDefault(); mostraVista('home'); });
+  document.getElementById('link-torna-home').addEventListener('click', (e) => { e.preventDefault(); gestisciNavigazioneHome(); });
 
   document.querySelectorAll('.footer-nav a[data-vista-link]').forEach((a) => {
-    a.addEventListener('click', (e) => { e.preventDefault(); mostraVista(a.dataset.vistaLink); });
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (a.dataset.vistaLink === 'home') gestisciNavigazioneHome();
+      else mostraVista(a.dataset.vistaLink);
+    });
   });
 
   document.getElementById('overlay-menu-contestuale').addEventListener('click', (e) => {
@@ -1934,6 +1960,8 @@ function inizializzaGestoriGlobali() {
   });
 
   document.getElementById('dettaglio-contenuto').addEventListener('click', gestisciClickDettaglio);
+  document.getElementById('dettaglio-contenuto').addEventListener('input', () => { formSporco = true; });
+  document.getElementById('dettaglio-contenuto').addEventListener('change', () => { formSporco = true; });
 
   document.getElementById('input-upload-foto').addEventListener('change', gestisciUploadFoto);
   document.getElementById('input-upload-libretto').addEventListener('change', gestisciUploadLibretto);
