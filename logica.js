@@ -27,6 +27,14 @@ let veicoloCorrente = null;
 /** true se il form dettaglio ha modifiche non ancora salvate (input dell'utente dall'ultimo salvataggio). */
 let formSporco = false;
 
+/**
+ * Id delle sezioni scheda veicolo attualmente collassate. Si azzera ogni volta che si
+ * apre una scheda (nuova o esistente) — quindi non persiste tra ricariche della pagina —
+ * ma resta valido tra un salvataggio e l'altro nella stessa sessione di editing, così
+ * collassare una sezione non la fa "riaprire" ad ogni singolo salvataggio di un'altra.
+ */
+let sezioniCollassate = new Set();
+
 /** Stato selezione/filtri della vista Statistiche (non fa parte di AppState). */
 let statisticheInizializzate = false;
 let statisticheVeicoliTutti = [];
@@ -67,6 +75,39 @@ function formattaData(iso) {
   const parti = String(iso).split('-');
   if (parti.length !== 3) return iso;
   return `${parti[2]}/${parti[1]}/${parti[0]}`;
+}
+
+/** Come formattaData, ma per popolare il value di un input testo (stringa vuota se assente). */
+function formattaDataPerInput(iso) {
+  if (!iso) return '';
+  const parti = String(iso).split('-');
+  if (parti.length !== 3) return '';
+  return `${parti[2]}/${parti[1]}/${parti[0]}`;
+}
+
+/**
+ * Valida una data digitata in formato "GG/MM/AAAA" (input testo libero, non date picker
+ * nativo — vedi Modifica 2) e la converte in ISO "AAAA-MM-GG" per lo storage, coerente
+ * con il formato già usato in tutto il resto del progetto (storicoKm, bollo.scadenza, ecc.).
+ * Vuoto è ammesso salvo diversa richiesta; controlla anche la validità reale del giorno
+ * nel mese indicato (es. rifiuta 31/04/2026).
+ */
+function validaData(testo, opzioni) {
+  const { consentiVuoto = true } = opzioni || {};
+  const valore = (testo || '').trim();
+  if (valore === '') {
+    return { valido: consentiVuoto, iso: null };
+  }
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(valore);
+  if (!match) return { valido: false, iso: null };
+  const giorno = parseInt(match[1], 10);
+  const mese = parseInt(match[2], 10);
+  const anno = parseInt(match[3], 10);
+  if (mese < 1 || mese > 12) return { valido: false, iso: null };
+  const giorniNelMese = new Date(anno, mese, 0).getDate();
+  if (giorno < 1 || giorno > giorniNelMese) return { valido: false, iso: null };
+  const iso = `${String(anno).padStart(4, '0')}-${String(mese).padStart(2, '0')}-${String(giorno).padStart(2, '0')}`;
+  return { valido: true, iso };
 }
 
 /** Formatta un numero con separatore delle migliaia in stile italiano. */
@@ -123,10 +164,11 @@ function pulisciErroriForm(container) {
 
 /**
  * Legge tutti i campi con [data-campo] dentro un contenitore e li applica a target.
- * I campi in un wrapper con [data-campo-numerico] vengono validati come numero:
+ * I campi in un wrapper con [data-campo-numerico] vengono validati come numero, quelli
+ * con [data-campo-data] come data "GG/MM/AAAA" (convertita in ISO per lo storage):
  * se non validi, quel singolo campo viene saltato (mostrando l'errore inline)
  * senza bloccare il salvataggio degli altri campi della sezione.
- * @returns {boolean} true se almeno un campo numerico non era valido.
+ * @returns {boolean} true se almeno un campo non era valido.
  */
 function applicaCampiSezione(container, target) {
   let ciSonoErrori = false;
@@ -149,6 +191,16 @@ function applicaCampiSezione(container, target) {
         return;
       }
       setDeep(target, percorso, numero);
+    } else if (wrapper && wrapper.hasAttribute('data-campo-data')) {
+      const { valido, iso } = validaData(input.value);
+      if (!valido) {
+        ciSonoErrori = true;
+        wrapper.classList.add('con-errore');
+        const err = wrapper.querySelector('.errore-campo');
+        if (err) err.classList.add('visibile');
+        return;
+      }
+      setDeep(target, percorso, iso);
     } else if (input.type === 'checkbox') {
       setDeep(target, percorso, input.checked);
     } else {
@@ -163,7 +215,7 @@ function confermaAzione(messaggio) {
   return window.confirm(messaggio);
 }
 
-/** Mostra un toast di feedback visivo (mai solo console.error). */
+/** Mostra un toast di feedback visivo (mai solo console.error). Gli errori restano visibili più a lungo. */
 function mostraToast(messaggio, tipo) {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -171,7 +223,7 @@ function mostraToast(messaggio, tipo) {
   el.className = `toast ${tipo || 'info'}`;
   el.textContent = messaggio;
   container.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
+  setTimeout(() => el.remove(), tipo === 'errore' ? 6000 : 3200);
 }
 
 /* ==========================================================
@@ -187,7 +239,7 @@ function creaVeicoloVuoto() {
     id: 'veicolo_' + Date.now(),
     stato: 'attivo',
     nomeScheda: '', marca: '', modello: '', allestimento: '', colore: '',
-    cilindrata: null, potenza: null, targa: '', annoPrimaImmatricolazione: null,
+    cilindrata: null, potenza: null, targa: '', numeroTelaio: '', annoPrimaImmatricolazione: null,
     kmAcquisto: null, kmAttuale: null, dataKmAttuale: null, storicoKm: [],
     storicoProprietariPrecedenti: [],
     proprietarioAttuale: { nome: '', annoImmatricolazione: null },
@@ -202,6 +254,7 @@ function creaVeicoloVuoto() {
 
 /** Garantisce che un veicolo letto dal DB abbia tutti i campi/array attesi (retro-compatibilità). */
 function normalizzaVeicolo(v) {
+  if (typeof v.numeroTelaio !== 'string') v.numeroTelaio = '';
   v.storicoKm = v.storicoKm || [];
   v.storicoProprietariPrecedenti = v.storicoProprietariPrecedenti || [];
   v.proprietarioAttuale = v.proprietarioAttuale || { nome: '', annoImmatricolazione: null };
@@ -549,6 +602,7 @@ function apriDettaglio(id) {
   if (id === null) {
     veicoloCorrente = creaVeicoloVuoto();
     formSporco = false;
+    sezioniCollassate = new Set();
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
     return;
@@ -557,13 +611,21 @@ function apriDettaglio(id) {
     if (!v) { mostraToast('Veicolo non trovato', 'errore'); mostraVista('home'); return; }
     veicoloCorrente = normalizzaVeicolo(v);
     formSporco = false;
+    sezioniCollassate = new Set();
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
   }).catch((err) => mostraToast(err.message || 'Errore nel caricamento del veicolo', 'errore'));
 }
 
-/** Salva l'intero veicoloCorrente tramite DB.salvaVeicolo, con feedback visivo. */
-function persistiVeicoloCorrente(messaggioSuccesso) {
+/**
+ * Salva l'intero veicoloCorrente tramite DB.salvaVeicolo, con feedback visivo.
+ * @param {string} messaggioSuccesso - Testo del toast mostrato al salvataggio riuscito.
+ * @param {Function} [onErrore] - Callback opzionale invocata (con l'errore) se il salvataggio
+ *   fallisce — usata per annullare in memoria una modifica ottimistica già renderizzata
+ *   (es. una foto aggiunta alla galleria) così la UI non mostra come "salvato" qualcosa
+ *   che in realtà non è stato persistito (vedi bug upload foto, Fase 6).
+ */
+function persistiVeicoloCorrente(messaggioSuccesso, onErrore) {
   DB.salvaVeicolo(veicoloCorrente).then(() => {
     AppState.veicoloSelezionatoId = veicoloCorrente.id;
     formSporco = false;
@@ -571,7 +633,34 @@ function persistiVeicoloCorrente(messaggioSuccesso) {
     aggiornaTestataDettaglio();
   }).catch((err) => {
     mostraToast(err.message || 'Errore durante il salvataggio', 'errore');
+    if (typeof onErrore === 'function') onErrore(err);
   });
+}
+
+/**
+ * Genera l'involucro standard di una sezione scheda veicolo: header centrato con
+ * titolo e freccia collassa/espandi, più il corpo con il contenuto fornito. Lo stato
+ * aperto/chiuso non persiste tra ricariche della pagina (si azzera ad ogni apertura
+ * veicolo, vedi apriDettaglio), solo entro la stessa sessione di editing.
+ * @param {string} idSezione - Identificativo stabile della sezione (es. "anagrafica").
+ * @param {string} classeColore - Classe CSS colore bordo/sfondo (es. "sec-anagrafica").
+ * @param {string} titolo - Titolo visibile della sezione.
+ * @param {string} contenutoHtml - Markup del corpo della sezione.
+ * @param {string} [idCorpo] - Id opzionale da assegnare al div del corpo (per applicaCampiSezione).
+ */
+function involucroSezione(idSezione, classeColore, titolo, contenutoHtml, idCorpo) {
+  const collassata = sezioniCollassate.has(idSezione);
+  return `
+    <article class="sezione-scheda ${classeColore}${collassata ? ' collassata' : ''}" data-sezione-id="${idSezione}">
+      <h3 data-azione="toggla-sezione" data-sezione-id="${idSezione}" aria-expanded="${collassata ? 'false' : 'true'}">
+        <span class="titolo-testo-sezione">${escapeHtml(titolo)}</span>
+        <span class="btn-collassa" aria-hidden="true"><svg class="icona-chevron"><use href="#icona-chevron"></use></svg></span>
+      </h3>
+      <div class="corpo-sezione"${idCorpo ? ` id="${idCorpo}"` : ''}>
+        ${contenutoHtml}
+      </div>
+    </article>
+  `;
 }
 
 /** Ri-renderizza il form dettaglio mantenendo la posizione di scorrimento. */
@@ -612,9 +701,7 @@ function renderDettaglioVeicolo() {
 /* ---- Anagrafica ---- */
 
 function generaHtmlAnagrafica(v) {
-  return `
-    <article class="sezione-scheda sezione-standard" id="fieldset-anagrafica">
-      <h3>Anagrafica</h3>
+  const contenuto = `
       <div class="campo-form">
         <label for="campo-nome-scheda">Nome scheda</label>
         <input type="text" id="campo-nome-scheda" data-campo="nomeScheda" value="${escapeHtml(v.nomeScheda)}" placeholder="Es. Panda 4x4">
@@ -657,14 +744,18 @@ function generaHtmlAnagrafica(v) {
           <input type="text" id="campo-targa" data-campo="targa" value="${escapeHtml(v.targa)}">
         </div>
         <div class="campo-form" data-campo-numerico>
-          <label for="campo-anno">Prima immatricolazione</label>
+          <label for="campo-anno">Prima immatricolazione (anno)</label>
           <input type="number" min="1900" max="2100" id="campo-anno" data-campo="annoPrimaImmatricolazione" value="${v.annoPrimaImmatricolazione ?? ''}">
           <span class="errore-campo">Anno non valido</span>
         </div>
       </div>
+      <div class="campo-form">
+        <label for="campo-numero-telaio">Numero di telaio</label>
+        <input type="text" id="campo-numero-telaio" data-campo="numeroTelaio" value="${escapeHtml(v.numeroTelaio)}">
+      </div>
       <button type="button" class="btn-primario" data-azione="salva-anagrafica">Salva sezione</button>
-    </article>
   `;
+  return involucroSezione('anagrafica', 'sec-anagrafica', 'Anagrafica', contenuto, 'fieldset-anagrafica');
 }
 
 function salvaSezioneAnagrafica() {
@@ -687,18 +778,17 @@ function generaHtmlChilometraggio(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sezione-standard" id="fieldset-km">
-      <h3>Chilometraggio</h3>
+  const contenuto = `
       <div class="riga-doppia-colonna">
         <div class="campo-form" data-campo-numerico>
           <label for="campo-km-attuale">Km attuale</label>
           <input type="number" min="0" id="campo-km-attuale" data-campo="kmAttuale" value="${v.kmAttuale ?? ''}">
           <span class="errore-campo">Km non valido</span>
         </div>
-        <div class="campo-form">
+        <div class="campo-form" data-campo-data>
           <label for="campo-data-km-attuale">Aggiornato il</label>
-          <input type="date" id="campo-data-km-attuale" data-campo="dataKmAttuale" value="${v.dataKmAttuale || ''}">
+          <input type="text" id="campo-data-km-attuale" data-campo="dataKmAttuale" placeholder="GG/MM/AAAA" value="${formattaDataPerInput(v.dataKmAttuale)}">
+          <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
         </div>
       </div>
       <div class="campo-form" data-campo-numerico>
@@ -721,7 +811,8 @@ function generaHtmlChilometraggio(v) {
           </div>
           <div class="campo-form">
             <label>Data</label>
-            <input type="date" id="km-form-data">
+            <input type="text" id="km-form-data" placeholder="GG/MM/AAAA">
+            <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
           </div>
         </div>
         <div class="riga-azioni-mini">
@@ -729,8 +820,8 @@ function generaHtmlChilometraggio(v) {
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-km">Salva riga</button>
         </div>
       </div>
-    </article>
   `;
+  return involucroSezione('chilometraggio', 'sec-chilometraggio', 'Chilometraggio', contenuto, 'fieldset-km');
 }
 
 function salvaSezioneKmSemplice() {
@@ -743,7 +834,7 @@ function mostraFormKm(indice) {
   const item = indice >= 0 ? veicoloCorrente.storicoKm[indice] : null;
   form.dataset.indiceEdit = String(indice);
   document.getElementById('km-form-valore').value = item ? item.km : '';
-  document.getElementById('km-form-data').value = item ? (item.data || '') : '';
+  document.getElementById('km-form-data').value = item ? formattaDataPerInput(item.data) : '';
   pulisciErroriForm(form);
   form.hidden = false;
   form.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -752,12 +843,15 @@ function mostraFormKm(indice) {
 function salvaRigaKm() {
   const form = document.getElementById('form-mini-km');
   const campoValore = document.getElementById('km-form-valore');
+  const campoData = document.getElementById('km-form-data');
   pulisciErroriForm(form);
   const { valido, numero } = validaNumero(campoValore.value, { consentiVuoto: false });
   if (!valido) { impostaErroreCampo(campoValore, true); mostraToast('Inserisci un valore km valido', 'errore'); return; }
+  const { valido: dataValida, iso } = validaData(campoData.value);
+  if (!dataValida) { impostaErroreCampo(campoData, true); mostraToast('Formato data non valido (GG/MM/AAAA)', 'errore'); return; }
 
   const indice = parseInt(form.dataset.indiceEdit, 10);
-  const riga = { km: numero, data: document.getElementById('km-form-data').value || null };
+  const riga = { km: numero, data: iso };
   if (indice >= 0) veicoloCorrente.storicoKm[indice] = riga;
   else veicoloCorrente.storicoKm.push(riga);
 
@@ -793,9 +887,7 @@ function generaHtmlProprietari(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sezione-standard">
-      <h3>Proprietari</h3>
+  const contenuto = `
       <div class="blocco-proprietario" id="fieldset-proprietario-attuale">
         <p class="etichetta-proprietario">Proprietario attuale</p>
         <div class="riga-doppia-colonna">
@@ -841,8 +933,8 @@ function generaHtmlProprietari(v) {
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-proprietario">Salva riga</button>
         </div>
       </div>
-    </article>
   `;
+  return involucroSezione('proprietari', 'sec-proprietari', 'Proprietari', contenuto);
 }
 
 function salvaSezioneProprietarioAttuale() {
@@ -894,13 +986,12 @@ function eliminaRigaProprietario(indice) {
 /* ---- Bollo / Assicurazione ---- */
 
 function generaHtmlBolloAssicurazione(v) {
-  return `
-    <article class="sezione-scheda sezione-bollo" id="fieldset-bollo-assicurazione">
-      <h3>Bollo e assicurazione</h3>
+  const contenuto = `
       <div class="riga-doppia-colonna">
-        <div class="campo-form">
+        <div class="campo-form" data-campo-data>
           <label for="campo-bollo-scadenza">Scadenza bollo</label>
-          <input type="date" id="campo-bollo-scadenza" data-campo="bollo.scadenza" value="${v.bollo.scadenza || ''}">
+          <input type="text" id="campo-bollo-scadenza" data-campo="bollo.scadenza" placeholder="GG/MM/AAAA" value="${formattaDataPerInput(v.bollo.scadenza)}">
+          <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
         </div>
         <div class="campo-form" data-campo-numerico>
           <label for="campo-bollo-costo">Costo bollo (€)</label>
@@ -909,9 +1000,10 @@ function generaHtmlBolloAssicurazione(v) {
         </div>
       </div>
       <div class="riga-doppia-colonna">
-        <div class="campo-form">
+        <div class="campo-form" data-campo-data>
           <label for="campo-assicurazione-scadenza">Scadenza assicurazione</label>
-          <input type="date" id="campo-assicurazione-scadenza" data-campo="assicurazione.scadenza" value="${v.assicurazione.scadenza || ''}">
+          <input type="text" id="campo-assicurazione-scadenza" data-campo="assicurazione.scadenza" placeholder="GG/MM/AAAA" value="${formattaDataPerInput(v.assicurazione.scadenza)}">
+          <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
         </div>
         <div class="campo-form" data-campo-numerico>
           <label for="campo-assicurazione-costo">Costo assicurazione (€)</label>
@@ -926,8 +1018,8 @@ function generaHtmlBolloAssicurazione(v) {
         </label>
       </div>
       <button type="button" class="btn-primario" data-azione="salva-bollo-assicurazione">Salva sezione</button>
-    </article>
   `;
+  return involucroSezione('bollo-assicurazione', 'sezione-bollo', 'Bollo e assicurazione', contenuto, 'fieldset-bollo-assicurazione');
 }
 
 function salvaSezioneBolloAssicurazione() {
@@ -958,18 +1050,17 @@ function generaHtmlRuote(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sec-ruote">
-      <h3>Ruote</h3>
+  const contenuto = `
       <div class="elenco-ruote" id="elenco-ruote">
         ${righe || '<p class="stato-vuoto" style="padding:10px 0;">Nessuna registrazione ruote.</p>'}
       </div>
       <button type="button" class="btn-aggiungi-riga" data-azione="mostra-form-ruota">+ Aggiungi cambio ruote</button>
       <div class="form-riga-mini" id="form-mini-ruota" data-id-edit="" hidden>
         <div class="riga-doppia-colonna">
-          <div class="campo-form">
+          <div class="campo-form" data-campo-data>
             <label>Data</label>
-            <input type="date" id="ruota-form-data">
+            <input type="text" id="ruota-form-data" placeholder="GG/MM/AAAA">
+            <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
           </div>
           <div class="campo-form">
             <label>Marchio</label>
@@ -989,28 +1080,34 @@ function generaHtmlRuote(v) {
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-ruota">Salva riga</button>
         </div>
       </div>
-    </article>
   `;
+  return involucroSezione('ruote', 'sec-ruote', 'Ruote', contenuto);
 }
 
 function mostraFormRuota(id) {
   const form = document.getElementById('form-mini-ruota');
   const item = id ? veicoloCorrente.ruote.find((r) => r.id === id) : null;
   form.dataset.idEdit = id || '';
-  document.getElementById('ruota-form-data').value = item ? (item.data || '') : '';
+  document.getElementById('ruota-form-data').value = item ? formattaDataPerInput(item.data) : '';
   document.getElementById('ruota-form-marchio').value = item ? (item.marchio || '') : '';
   document.getElementById('ruota-form-dimensioni').value = item ? (item.dimensioni || '') : '';
   document.getElementById('ruota-form-note').value = item ? (item.note || '') : '';
+  pulisciErroriForm(form);
   form.hidden = false;
   form.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 function salvaRigaRuota() {
   const form = document.getElementById('form-mini-ruota');
+  pulisciErroriForm(form);
+  const campoData = document.getElementById('ruota-form-data');
+  const { valido, iso } = validaData(campoData.value);
+  if (!valido) { impostaErroreCampo(campoData, true); mostraToast('Formato data non valido (GG/MM/AAAA)', 'errore'); return; }
+
   const idEdit = form.dataset.idEdit;
   const riga = {
     id: idEdit || generaId('ruota'),
-    data: document.getElementById('ruota-form-data').value || null,
+    data: iso,
     marchio: document.getElementById('ruota-form-marchio').value.trim(),
     dimensioni: document.getElementById('ruota-form-dimensioni').value.trim(),
     note: document.getElementById('ruota-form-note').value.trim()
@@ -1029,9 +1126,7 @@ function salvaRigaRuota() {
 
 function generaHtmlLibretto(v) {
   const fotoLibretto = trovaFoto(v, v.libretto.fotoId);
-  return `
-    <article class="sezione-scheda sezione-libretto">
-      <h3>Libretto</h3>
+  const contenuto = `
       <div class="placeholder-documento">
         <svg aria-hidden="true"><use href="#icona-documento"></use></svg>
         <span>${fotoLibretto ? 'Foto caricata' : 'Foto libretto non ancora caricata'}</span>
@@ -1040,17 +1135,15 @@ function generaHtmlLibretto(v) {
         <button type="button" class="btn-secondario-piccolo" data-azione="carica-libretto">Carica foto</button>
         ${fotoLibretto ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-libretto">Rimuovi</button>' : ''}
       </div>
-    </article>
   `;
+  return involucroSezione('libretto', 'sezione-libretto', 'Libretto', contenuto);
 }
 
 /* ---- Bolletta bollo (card indipendente) ---- */
 
 function generaHtmlBollettaBollo(v) {
   const fotoBolletta = trovaFoto(v, v.bollettaBollo.fotoId);
-  return `
-    <article class="sezione-scheda sec-bolletta-bollo">
-      <h3>Bolletta bollo</h3>
+  const contenuto = `
       <div class="placeholder-documento">
         <svg aria-hidden="true"><use href="#icona-documento"></use></svg>
         <span>${fotoBolletta ? 'Foto caricata' : 'Foto bolletta non ancora caricata'}</span>
@@ -1059,8 +1152,8 @@ function generaHtmlBollettaBollo(v) {
         <button type="button" class="btn-secondario-piccolo" data-azione="carica-bolletta">Carica foto</button>
         ${fotoBolletta ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-bolletta">Rimuovi</button>' : ''}
       </div>
-    </article>
   `;
+  return involucroSezione('bolletta-bollo', 'sec-bolletta-bollo', 'Bolletta bollo', contenuto);
 }
 
 function rimuoviLibretto() {
@@ -1082,7 +1175,13 @@ function gestisciUploadLibretto(e) {
   const nuovaFoto = { id: generaId('foto'), blob: file, copertina: false };
   veicoloCorrente.foto.push(nuovaFoto);
   veicoloCorrente.libretto.fotoId = nuovaFoto.id;
-  persistiVeicoloCorrente('Libretto caricato');
+  persistiVeicoloCorrente('Libretto caricato', () => {
+    // Salvataggio fallito (es. QuotaExceededError): annulla la modifica ottimistica,
+    // altrimenti la UI mostrerebbe il libretto come caricato pur non essendo stato salvato.
+    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== nuovaFoto.id);
+    veicoloCorrente.libretto.fotoId = null;
+    reRenderDettaglioPreservandoScroll();
+  });
   reRenderDettaglioPreservandoScroll();
 }
 
@@ -1093,7 +1192,11 @@ function gestisciUploadBollettaBollo(e) {
   const nuovaFoto = { id: generaId('foto'), blob: file, copertina: false };
   veicoloCorrente.foto.push(nuovaFoto);
   veicoloCorrente.bollettaBollo.fotoId = nuovaFoto.id;
-  persistiVeicoloCorrente('Bolletta bollo caricata');
+  persistiVeicoloCorrente('Bolletta bollo caricata', () => {
+    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== nuovaFoto.id);
+    veicoloCorrente.bollettaBollo.fotoId = null;
+    reRenderDettaglioPreservandoScroll();
+  });
   reRenderDettaglioPreservandoScroll();
 }
 
@@ -1116,9 +1219,7 @@ function generaHtmlManutenzioni(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sezione-manutenzioni">
-      <h3>Manutenzioni</h3>
+  const contenuto = `
       <div class="elenco-manutenzioni" id="elenco-manutenzioni">
         ${righe || '<p class="stato-vuoto" style="padding:10px 0;">Nessuna manutenzione registrata.</p>'}
       </div>
@@ -1137,8 +1238,8 @@ function generaHtmlManutenzioni(v) {
           </div>
           <div class="campo-form">
             <label>Data</label>
-            <input type="date" id="manutenzione-form-data">
-            <span class="errore-campo">Campo obbligatorio</span>
+            <input type="text" id="manutenzione-form-data" placeholder="GG/MM/AAAA">
+            <span class="errore-campo">Data obbligatoria (GG/MM/AAAA)</span>
           </div>
         </div>
         <div class="riga-doppia-colonna">
@@ -1162,8 +1263,8 @@ function generaHtmlManutenzioni(v) {
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-manutenzione">Salva riga</button>
         </div>
       </div>
-    </article>
   `;
+  return involucroSezione('manutenzioni', 'sezione-manutenzioni', 'Manutenzioni', contenuto);
 }
 
 function mostraFormManutenzione(id) {
@@ -1172,7 +1273,7 @@ function mostraFormManutenzione(id) {
   form.dataset.idEdit = id || '';
   document.getElementById('manutenzione-form-descrizione').value = item ? (item.descrizione || '') : '';
   document.getElementById('manutenzione-form-esecutore').value = item ? (item.esecutore || '') : '';
-  document.getElementById('manutenzione-form-data').value = item ? (item.data || '') : '';
+  document.getElementById('manutenzione-form-data').value = item ? formattaDataPerInput(item.data) : '';
   document.getElementById('manutenzione-form-tipo').value = item ? (item.tipo || '') : '';
   document.getElementById('manutenzione-form-costo').value = item && item.costo != null ? item.costo : '';
   pulisciErroriForm(form);
@@ -1192,7 +1293,8 @@ function salvaRigaManutenzione() {
   let errori = false;
   if (!campoDescrizione.value.trim()) { impostaErroreCampo(campoDescrizione, true); errori = true; }
   if (!campoEsecutore.value.trim()) { impostaErroreCampo(campoEsecutore, true); errori = true; }
-  if (!campoData.value) { impostaErroreCampo(campoData, true); errori = true; }
+  const { valido: dataValida, iso: dataIso } = validaData(campoData.value, { consentiVuoto: false });
+  if (!dataValida) { impostaErroreCampo(campoData, true); errori = true; }
   if (!campoTipo.value) { impostaErroreCampo(campoTipo, true); errori = true; }
   const { valido: costoValido, numero: costoNumero } = validaNumero(campoCosto.value);
   if (!costoValido) { impostaErroreCampo(campoCosto, true); errori = true; }
@@ -1204,7 +1306,7 @@ function salvaRigaManutenzione() {
     id: idEdit || generaId('manutenzione'),
     descrizione: campoDescrizione.value.trim(),
     esecutore: campoEsecutore.value.trim(),
-    data: campoData.value,
+    data: dataIso,
     tipo: campoTipo.value,
     costo: costoNumero,
     fotoFatturaId: esistente ? (esistente.fotoFatturaId || null) : null
@@ -1237,18 +1339,17 @@ function generaHtmlRifornimenti(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sezione-standard">
-      <h3>Rifornimenti carburante</h3>
+  const contenuto = `
       <div class="elenco-manutenzioni" id="elenco-rifornimenti">
         ${righe || '<p class="stato-vuoto" style="padding:10px 0;">Nessun rifornimento registrato.</p>'}
       </div>
       <button type="button" class="btn-aggiungi-riga" data-azione="mostra-form-rifornimento">+ Aggiungi rifornimento</button>
       <div class="form-riga-mini" id="form-mini-rifornimento" data-id-edit="" hidden>
         <div class="riga-doppia-colonna">
-          <div class="campo-form">
+          <div class="campo-form" data-campo-data>
             <label>Data</label>
-            <input type="date" id="rifornimento-form-data">
+            <input type="text" id="rifornimento-form-data" placeholder="GG/MM/AAAA">
+            <span class="errore-campo">Formato data non valido (GG/MM/AAAA)</span>
           </div>
           <div class="campo-form" data-campo-numerico>
             <label>Litri</label>
@@ -1273,15 +1374,15 @@ function generaHtmlRifornimenti(v) {
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-rifornimento">Salva riga</button>
         </div>
       </div>
-    </article>
   `;
+  return involucroSezione('rifornimenti', 'sec-rifornimenti', 'Rifornimenti carburante', contenuto);
 }
 
 function mostraFormRifornimento(id) {
   const form = document.getElementById('form-mini-rifornimento');
   const item = id ? veicoloCorrente.rifornimenti.find((r) => r.id === id) : null;
   form.dataset.idEdit = id || '';
-  document.getElementById('rifornimento-form-data').value = item ? (item.data || '') : '';
+  document.getElementById('rifornimento-form-data').value = item ? formattaDataPerInput(item.data) : '';
   document.getElementById('rifornimento-form-litri').value = item && item.litri != null ? item.litri : '';
   document.getElementById('rifornimento-form-costo').value = item && item.costo != null ? item.costo : '';
   document.getElementById('rifornimento-form-km').value = item && item.km != null ? item.km : '';
@@ -1293,13 +1394,16 @@ function mostraFormRifornimento(id) {
 function salvaRigaRifornimento() {
   const form = document.getElementById('form-mini-rifornimento');
   pulisciErroriForm(form);
+  const campoData = document.getElementById('rifornimento-form-data');
   const campoLitri = document.getElementById('rifornimento-form-litri');
   const campoCosto = document.getElementById('rifornimento-form-costo');
   const campoKm = document.getElementById('rifornimento-form-km');
+  const data = validaData(campoData.value);
   const litri = validaNumero(campoLitri.value);
   const costo = validaNumero(campoCosto.value);
   const km = validaNumero(campoKm.value);
   let errori = false;
+  if (!data.valido) { impostaErroreCampo(campoData, true); errori = true; }
   if (!litri.valido) { impostaErroreCampo(campoLitri, true); errori = true; }
   if (!costo.valido) { impostaErroreCampo(campoCosto, true); errori = true; }
   if (!km.valido) { impostaErroreCampo(campoKm, true); errori = true; }
@@ -1308,7 +1412,7 @@ function salvaRigaRifornimento() {
   const idEdit = form.dataset.idEdit;
   const riga = {
     id: idEdit || generaId('rifornimento'),
-    data: document.getElementById('rifornimento-form-data').value || null,
+    data: data.iso,
     litri: litri.numero, costo: costo.numero, km: km.numero
   };
   if (!veicoloCorrente.rifornimenti) veicoloCorrente.rifornimenti = [];
@@ -1332,16 +1436,14 @@ function generaHtmlFoto(v) {
     </div>
   `).join('');
 
-  return `
-    <article class="sezione-scheda sezione-foto">
-      <h3>Foto</h3>
+  const contenuto = `
       <div class="griglia-foto" id="griglia-foto-veicolo">
         <div class="foto-placeholder-quadrata tile-aggiungi" data-azione="apri-upload-foto" aria-label="Aggiungi foto">+</div>
         ${tiles}
       </div>
       <p class="nota-anteprima" style="margin-top:10px;">Tocca a lungo una foto per impostarla come copertina o rimuoverla.</p>
-    </article>
   `;
+  return involucroSezione('foto', 'sezione-foto', 'Foto', contenuto);
 }
 
 /** Dopo il render, inserisce le miniature reali (Blob→object URL) e abilita il tap lungo. */
@@ -1399,30 +1501,39 @@ function rimuoviFoto(fotoId) {
   reRenderDettaglioPreservandoScroll();
 }
 
-/** Gestisce la selezione di uno o più file dalla galleria generale foto[]. */
+/**
+ * Gestisce la selezione di uno o più file dalla galleria generale foto[].
+ * Se il salvataggio su DB fallisce (es. QuotaExceededError), le foto appena
+ * aggiunte vengono rimosse di nuovo dalla UI: senza questo rollback la scheda
+ * mostrerebbe le foto come caricate anche quando in realtà non sono state
+ * persistite, dando l'impressione errata che l'upload sia riuscito (bug segnalato
+ * dall'utente — causa identificata: render ottimistico + errore silenziosamente
+ * "perso" nel toast, vedi indagine in Sezione 8/Fase 6).
+ */
 function gestisciUploadFoto(e) {
   const files = e.target.files;
   e.target.value = '';
   if (!files || files.length === 0) return;
-  Array.from(files).forEach((file) => {
-    veicoloCorrente.foto.push({ id: generaId('foto'), blob: file, copertina: false });
+  const nuoveFoto = Array.from(files).map((file) => ({ id: generaId('foto'), blob: file, copertina: false }));
+  nuoveFoto.forEach((f) => veicoloCorrente.foto.push(f));
+  persistiVeicoloCorrente(nuoveFoto.length > 1 ? 'Foto caricate' : 'Foto caricata', () => {
+    const idNuoveFoto = new Set(nuoveFoto.map((f) => f.id));
+    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => !idNuoveFoto.has(f.id));
+    reRenderDettaglioPreservandoScroll();
   });
-  persistiVeicoloCorrente(files.length > 1 ? 'Foto caricate' : 'Foto caricata');
   reRenderDettaglioPreservandoScroll();
 }
 
 /* ---- Note ---- */
 
 function generaHtmlNote(v) {
-  return `
-    <article class="sezione-scheda sezione-note" id="fieldset-note">
-      <h3>Note</h3>
+  const contenuto = `
       <div class="campo-form">
         <textarea id="campo-note" data-campo="note" rows="4" style="width:100%; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; font-size:0.85rem; color:var(--testo-primario); font-family:inherit; resize:vertical;">${escapeHtml(v.note)}</textarea>
       </div>
       <button type="button" class="btn-primario" data-azione="salva-note">Salva sezione</button>
-    </article>
   `;
+  return involucroSezione('note', 'sezione-note', 'Note', contenuto, 'fieldset-note');
 }
 
 function salvaSezioneNote() {
@@ -1495,6 +1606,17 @@ function gestisciClickDettaglio(event) {
     case 'salva-note': salvaSezioneNote(); break;
 
     case 'apri-upload-foto': document.getElementById('input-upload-foto').click(); break;
+
+    case 'toggla-sezione': {
+      const idSezione = el.dataset.sezioneId;
+      const articolo = el.closest('.sezione-scheda');
+      const collassa = !articolo.classList.contains('collassata');
+      articolo.classList.toggle('collassata', collassa);
+      el.setAttribute('aria-expanded', String(!collassa));
+      if (collassa) sezioniCollassate.add(idSezione);
+      else sezioniCollassate.delete(idSezione);
+      break;
+    }
 
     default: break;
   }
@@ -1843,6 +1965,7 @@ function generaEScaricaPdf(v) {
     scriviRiga('Cilindrata', v.cilindrata != null ? v.cilindrata + ' cc' : null);
     scriviRiga('Potenza', v.potenza != null ? v.potenza + ' CV' : null);
     scriviRiga('Targa', v.targa);
+    scriviRiga('Numero di telaio', v.numeroTelaio);
     scriviRiga('Prima immatricolazione', v.annoPrimaImmatricolazione);
     spazio(3);
 

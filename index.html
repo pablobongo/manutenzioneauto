@@ -280,18 +280,58 @@
   }
 
   .sezione-scheda h3 {
-    font-size: 0.9rem;
-    font-weight: 700;
-    margin-bottom: 12px;
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .sezione-scheda .btn-collassa {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--testo-secondario);
+    flex-shrink: 0;
+  }
+
+  .sezione-scheda .icona-chevron {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.2s ease;
+  }
+
+  .sezione-scheda.collassata .icona-chevron {
+    transform: rotate(-90deg);
+  }
+
+  .sezione-scheda.collassata .corpo-sezione {
+    display: none;
   }
 
   .sezione-standard {
     background: linear-gradient(160deg, var(--card-grad-inizio), var(--card-grad-fine));
     border: 1px solid rgba(255, 255, 255, 0.05);
   }
+
+  .sec-anagrafica { border-left: 4px solid #2A6E68; background: rgba(42,110,104,0.10); }
+
+  .sec-chilometraggio { border-left: 4px solid #6E2A4D; background: rgba(110,42,77,0.10); }
+
+  .sec-proprietari { border-left: 4px solid #7A3A22; background: rgba(122,58,34,0.10); }
+
+  .sec-rifornimenti { border-left: 4px solid #5A4A3A; background: rgba(90,74,58,0.10); }
 
   .sezione-libretto {
     border-left: 4px solid var(--colore-libretto);
@@ -1109,6 +1149,9 @@
       <rect x="3" y="5" width="18" height="14" rx="2"/>
       <circle cx="9" cy="11" r="2.2"/>
       <path d="M21 17l-5.5-5.5a1.5 1.5 0 0 0-2.1 0L6 19"/>
+    </symbol>
+    <symbol id="icona-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9l6 6 6-6"/>
     </symbol>
     <symbol id="icona-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 11l9-8 9 8"/>
