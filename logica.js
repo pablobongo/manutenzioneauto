@@ -19,7 +19,7 @@ const AppState = {
   backupInCorso: false
 };
 
-const VERSIONE_APP = '1.0.0';
+const VERSIONE_APP = '1.1.0';
 
 /** Veicolo attualmente aperto nella vista dettaglio/form (nuovo o esistente). */
 let veicoloCorrente = null;
@@ -27,13 +27,21 @@ let veicoloCorrente = null;
 /** true se il form dettaglio ha modifiche non ancora salvate (input dell'utente dall'ultimo salvataggio). */
 let formSporco = false;
 
+/** Id di tutte le sezioni della scheda veicolo, nell'ordine in cui vengono renderizzate. */
+const TUTTE_LE_SEZIONI = [
+  'anagrafica', 'foto-auto', 'chilometraggio', 'proprietari', 'bollo-assicurazione',
+  'ruote', 'libretto', 'attestazione-proprieta', 'bolletta-bollo',
+  'manutenzioni', 'rifornimenti', 'note'
+];
+
 /**
- * Id delle sezioni scheda veicolo attualmente collassate. Si azzera ogni volta che si
- * apre una scheda (nuova o esistente) — quindi non persiste tra ricariche della pagina —
- * ma resta valido tra un salvataggio e l'altro nella stessa sessione di editing, così
- * collassare una sezione non la fa "riaprire" ad ogni singolo salvataggio di un'altra.
+ * Id delle sezioni scheda veicolo attualmente collassate. Si azzera (tornando TUTTE
+ * chiuse di default) ogni volta che si apre una scheda — quindi non persiste tra
+ * ricariche della pagina — ma resta valido tra un salvataggio e l'altro nella stessa
+ * sessione di editing, così espandere/collassare una sezione non altera le altre ad
+ * ogni singolo salvataggio.
  */
-let sezioniCollassate = new Set();
+let sezioniCollassate = new Set(TUTTE_LE_SEZIONI);
 
 /** Stato selezione/filtri della vista Statistiche (non fa parte di AppState). */
 let statisticheInizializzate = false;
@@ -215,6 +223,104 @@ function confermaAzione(messaggio) {
   return window.confirm(messaggio);
 }
 
+/** Lato massimo (px) e qualità JPEG usati dalla compressione immagini (Assunzione A4, Pattern P02). */
+const COMPRESSIONE_LATO_MASSIMO_PX = 1600;
+const COMPRESSIONE_QUALITA_JPEG = 0.8;
+
+/**
+ * Comprime un'immagine lato client prima del salvataggio: ridimensiona al lato più
+ * lungo massimo 1600px (mantenendo l'aspect ratio) e converte in JPEG qualità ~0.8
+ * tramite Canvas API nativo (nessuna libreria esterna). Riduce drasticamente il
+ * rischio di QuotaExceededError con foto reali da smartphone (spesso vari MB
+ * ciascuna) — causa del bug upload foto mai risolta prima d'ora (Fase 6).
+ * @param {File|Blob} file - File immagine originale selezionato dall'utente.
+ * @returns {Promise<Blob>} Promise che risolve con il Blob JPEG compresso.
+ * @throws Rigetta la Promise se il file non è un'immagine leggibile o la compressione fallisce.
+ */
+function comprimiImmagine(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > COMPRESSIONE_LATO_MASSIMO_PX || height > COMPRESSIONE_LATO_MASSIMO_PX) {
+        if (width >= height) {
+          height = Math.round(height * (COMPRESSIONE_LATO_MASSIMO_PX / width));
+          width = COMPRESSIONE_LATO_MASSIMO_PX;
+        } else {
+          width = Math.round(width * (COMPRESSIONE_LATO_MASSIMO_PX / height));
+          height = COMPRESSIONE_LATO_MASSIMO_PX;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Impossibile comprimere l'immagine selezionata."));
+      }, 'image/jpeg', COMPRESSIONE_QUALITA_JPEG);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Il file selezionato non è un\'immagine valida.'));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Pipeline comune per ogni punto di upload di una singola foto: comprime l'immagine,
+ * la aggiunge allo store interno foto[], collega il suo id tramite collegaFotoId(),
+ * salva e gestisce il rollback in caso di errore (la UI non deve mai mostrare come
+ * "caricata" una foto che in realtà non è stata persistita — vedi Fase 6).
+ * @param {File} file - File immagine originale selezionato dall'utente.
+ * @param {Function} collegaFotoId - (nuovoId) => void — collega il nuovo id nel punto giusto di veicoloCorrente.
+ * @param {Function} scollegaFotoId - () => void — annulla il collegamento in caso di rollback.
+ * @param {string} messaggioSuccesso - Testo del toast di successo.
+ */
+function gestisciUploadFotoGenerico(file, collegaFotoId, scollegaFotoId, messaggioSuccesso) {
+  if (!file) return;
+  comprimiImmagine(file).then((blobCompresso) => {
+    const nuovaFoto = { id: generaId('foto'), blob: blobCompresso };
+    veicoloCorrente.foto.push(nuovaFoto);
+    collegaFotoId(nuovaFoto.id);
+    persistiVeicoloCorrente(messaggioSuccesso, () => {
+      veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== nuovaFoto.id);
+      scollegaFotoId();
+      reRenderDettaglioPreservandoScroll();
+    });
+    reRenderDettaglioPreservandoScroll();
+  }).catch((err) => {
+    mostraToast(err.message || 'Errore durante la compressione della foto', 'errore');
+  });
+}
+
+/** Genera il markup di un'anteprima foto quadrata (immagine se presente, icona placeholder altrimenti). */
+function generaHtmlAnteprimaFoto(v, fotoId, iconaPlaceholder) {
+  const foto = trovaFoto(v, fotoId);
+  if (foto && foto.blob) {
+    return `<div class="foto-placeholder-quadrata" data-anteprima-foto-id="${foto.id}"></div>`;
+  }
+  return `<div class="foto-placeholder-quadrata"><svg aria-hidden="true"><use href="#${iconaPlaceholder}"></use></svg></div>`;
+}
+
+/**
+ * Dopo il render, inserisce le miniature reali (Blob→object URL) in tutti i
+ * placeholder con [data-anteprima-foto-id] presenti in un contenitore.
+ */
+function popolaAnteprimeFoto(v, container) {
+  container.querySelectorAll('[data-anteprima-foto-id]').forEach((item) => {
+    const foto = trovaFoto(v, item.dataset.anteprimaFotoId);
+    if (!foto || !foto.blob || item.querySelector('img')) return;
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(foto.blob);
+    item.appendChild(img);
+  });
+}
+
 /** Mostra un toast di feedback visivo (mai solo console.error). Gli errori restano visibili più a lungo. */
 function mostraToast(messaggio, tipo) {
   const container = document.getElementById('toast-container');
@@ -246,7 +352,10 @@ function creaVeicoloVuoto() {
     bollo: { scadenza: null, costo: null },
     assicurazione: { costo: null, scadenza: null, rinnovoMensile: false },
     ruote: [],
-    libretto: { fotoId: null }, bollettaBollo: { fotoId: null },
+    fotoAuto: { fotoId: null },
+    libretto: { fotoId: null },
+    attestazioneProprietaDigitale: { fotoId: null },
+    bollettaBollo: [],
     manutenzioni: [], foto: [], note: '',
     rifornimenti: []
   };
@@ -261,8 +370,19 @@ function normalizzaVeicolo(v) {
   v.bollo = v.bollo || { scadenza: null, costo: null };
   v.assicurazione = v.assicurazione || { costo: null, scadenza: null, rinnovoMensile: false };
   v.ruote = v.ruote || [];
+  v.fotoAuto = v.fotoAuto || { fotoId: null };
   v.libretto = v.libretto || { fotoId: null };
-  v.bollettaBollo = v.bollettaBollo || { fotoId: null };
+  v.attestazioneProprietaDigitale = v.attestazioneProprietaDigitale || { fotoId: null };
+  // Migrazione: prima di questa fase bollettaBollo era un oggetto singolo {fotoId}; ora è
+  // uno storico multi-voce con anno. Un record vecchio con una foto già caricata viene
+  // convertito nella prima voce dell'array, per non perdere il dato esistente.
+  if (Array.isArray(v.bollettaBollo)) {
+    // già nel nuovo formato
+  } else if (v.bollettaBollo && v.bollettaBollo.fotoId) {
+    v.bollettaBollo = [{ id: generaId('bolletta'), fotoId: v.bollettaBollo.fotoId, anno: null }];
+  } else {
+    v.bollettaBollo = [];
+  }
   v.manutenzioni = v.manutenzioni || [];
   v.foto = v.foto || [];
   v.rifornimenti = v.rifornimenti || [];
@@ -337,13 +457,17 @@ function caricaArchivio() {
   }).catch((err) => mostraToast(err.message || "Errore nel caricamento dell'archivio", 'errore'));
 }
 
-/** Legge/inizializza la versione app mostrata in Impostazioni. */
+/**
+ * Mostra in Impostazioni la versione app corrente (VERSIONE_APP, definita nel codice)
+ * e la sincronizza nello store impostazioni. La versione mostrata riflette SEMPRE la
+ * costante corrente, non un valore vecchio già salvato in precedenza: altrimenti su un
+ * database già esistente il numero visualizzato resterebbe bloccato alla prima versione
+ * mai installata, anche dopo un aggiornamento del codice.
+ */
 function caricaImpostazioni() {
   const el = document.getElementById('valore-versione-app');
-  DB.getImpostazione('versioneApp').then((v) => {
-    if (v) { el.textContent = v; return; }
-    return DB.setImpostazione('versioneApp', VERSIONE_APP).then(() => { el.textContent = VERSIONE_APP; });
-  }).catch(() => { el.textContent = VERSIONE_APP; });
+  el.textContent = VERSIONE_APP;
+  DB.setImpostazione('versioneApp', VERSIONE_APP).catch(() => {});
   aggiornaEtichettaUltimoBackup();
 }
 
@@ -388,7 +512,7 @@ function creaCardVeicolo(veicolo, contesto) {
 
   const fotoBox = document.createElement('div');
   fotoBox.className = 'foto-copertina-placeholder';
-  const copertina = (veicolo.foto || []).find((f) => f.copertina);
+  const copertina = trovaFoto(veicolo, veicolo.fotoAuto && veicolo.fotoAuto.fotoId);
   if (copertina && copertina.blob) {
     const img = document.createElement('img');
     img.src = URL.createObjectURL(copertina.blob);
@@ -602,7 +726,7 @@ function apriDettaglio(id) {
   if (id === null) {
     veicoloCorrente = creaVeicoloVuoto();
     formSporco = false;
-    sezioniCollassate = new Set();
+    sezioniCollassate = new Set(TUTTE_LE_SEZIONI);
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
     return;
@@ -611,7 +735,7 @@ function apriDettaglio(id) {
     if (!v) { mostraToast('Veicolo non trovato', 'errore'); mostraVista('home'); return; }
     veicoloCorrente = normalizzaVeicolo(v);
     formSporco = false;
-    sezioniCollassate = new Set();
+    sezioniCollassate = new Set(TUTTE_LE_SEZIONI);
     mostraVista('dettaglioVeicolo');
     renderDettaglioVeicolo();
   }).catch((err) => mostraToast(err.message || 'Errore nel caricamento del veicolo', 'errore'));
@@ -685,17 +809,18 @@ function renderDettaglioVeicolo() {
   const cont = document.getElementById('dettaglio-contenuto');
   cont.innerHTML =
     generaHtmlAnagrafica(veicoloCorrente) +
+    generaHtmlFotoAuto(veicoloCorrente) +
     generaHtmlChilometraggio(veicoloCorrente) +
     generaHtmlProprietari(veicoloCorrente) +
     generaHtmlBolloAssicurazione(veicoloCorrente) +
     generaHtmlRuote(veicoloCorrente) +
     generaHtmlLibretto(veicoloCorrente) +
+    generaHtmlAttestazioneProprietaDigitale(veicoloCorrente) +
     generaHtmlBollettaBollo(veicoloCorrente) +
     generaHtmlManutenzioni(veicoloCorrente) +
     generaHtmlRifornimenti(veicoloCorrente) +
-    generaHtmlFoto(veicoloCorrente) +
     generaHtmlNote(veicoloCorrente);
-  popolaMiniatureFoto(veicoloCorrente);
+  popolaAnteprimeFoto(veicoloCorrente, cont);
 }
 
 /* ---- Anagrafica ---- */
@@ -1122,38 +1247,109 @@ function salvaRigaRuota() {
   reRenderDettaglioPreservandoScroll();
 }
 
-/* ---- Libretto (card indipendente) ---- */
+/* ---- Libretto (card indipendente, anteprima inline) ---- */
 
 function generaHtmlLibretto(v) {
   const fotoLibretto = trovaFoto(v, v.libretto.fotoId);
   const contenuto = `
-      <div class="placeholder-documento">
-        <svg aria-hidden="true"><use href="#icona-documento"></use></svg>
-        <span>${fotoLibretto ? 'Foto caricata' : 'Foto libretto non ancora caricata'}</span>
-      </div>
+      <div class="anteprima-foto-singola">${generaHtmlAnteprimaFoto(v, v.libretto.fotoId, 'icona-documento')}</div>
       <div class="riga-azioni-mini">
-        <button type="button" class="btn-secondario-piccolo" data-azione="carica-libretto">Carica foto</button>
+        <button type="button" class="btn-secondario-piccolo" data-azione="carica-libretto">${fotoLibretto ? 'Sostituisci foto' : 'Carica foto'}</button>
         ${fotoLibretto ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-libretto">Rimuovi</button>' : ''}
       </div>
   `;
   return involucroSezione('libretto', 'sezione-libretto', 'Libretto', contenuto);
 }
 
-/* ---- Bolletta bollo (card indipendente) ---- */
+/* ---- Attestazione di Proprietà Digitale (card indipendente, anteprima inline) ---- */
+
+function generaHtmlAttestazioneProprietaDigitale(v) {
+  const foto = trovaFoto(v, v.attestazioneProprietaDigitale.fotoId);
+  const contenuto = `
+      <div class="anteprima-foto-singola">${generaHtmlAnteprimaFoto(v, v.attestazioneProprietaDigitale.fotoId, 'icona-documento')}</div>
+      <div class="riga-azioni-mini">
+        <button type="button" class="btn-secondario-piccolo" data-azione="carica-attestazione">${foto ? 'Sostituisci foto' : 'Carica foto'}</button>
+        ${foto ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-attestazione">Rimuovi</button>' : ''}
+      </div>
+  `;
+  return involucroSezione('attestazione-proprieta', 'sec-attestazione-proprieta', 'Attestazione di Proprietà Digitale', contenuto);
+}
+
+/* ---- Bolletta bollo (storico multi-voce con anno, Fase 6) ---- */
 
 function generaHtmlBollettaBollo(v) {
-  const fotoBolletta = trovaFoto(v, v.bollettaBollo.fotoId);
-  const contenuto = `
-      <div class="placeholder-documento">
-        <svg aria-hidden="true"><use href="#icona-documento"></use></svg>
-        <span>${fotoBolletta ? 'Foto caricata' : 'Foto bolletta non ancora caricata'}</span>
+  const ordinate = [...v.bollettaBollo].sort((a, b) => (b.anno ?? -Infinity) - (a.anno ?? -Infinity));
+  const righe = ordinate.map((r) => {
+    const foto = trovaFoto(v, r.fotoId);
+    return `
+    <div class="voce-documento-multipla riga-cliccabile" data-azione="modifica-bolletta" data-id="${r.id}">
+      ${generaHtmlAnteprimaFoto(v, r.fotoId, 'icona-documento')}
+      <div class="dettagli-voce-documento">
+        <span class="anno-voce-documento">${r.anno != null ? 'Anno ' + r.anno : 'Anno non specificato'}</span>
+        <span class="stato-foto-voce">${foto ? 'Foto caricata' : 'Nessuna foto'}</span>
       </div>
-      <div class="riga-azioni-mini">
-        <button type="button" class="btn-secondario-piccolo" data-azione="carica-bolletta">Carica foto</button>
-        ${fotoBolletta ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-bolletta">Rimuovi</button>' : ''}
+      <button type="button" class="btn-elimina-riga" data-azione="elimina-bolletta" data-id="${r.id}" aria-label="Elimina">×</button>
+    </div>
+    `;
+  }).join('');
+
+  const contenuto = `
+      <div class="elenco-documenti-multipli" id="elenco-bolletta-bollo">
+        ${righe || '<p class="stato-vuoto" style="padding:10px 0;">Nessuna bolletta caricata.</p>'}
+      </div>
+      <button type="button" class="btn-aggiungi-riga" data-azione="mostra-form-bolletta">+ Aggiungi bolletta</button>
+      <div class="form-riga-mini" id="form-mini-bolletta" data-id-edit="" hidden>
+        <div class="campo-form" data-campo-numerico>
+          <label>Anno di riferimento</label>
+          <input type="number" min="1900" max="2100" id="bolletta-form-anno">
+          <span class="errore-campo">Anno non valido</span>
+        </div>
+        <div class="riga-azioni-mini">
+          <button type="button" class="btn-secondario-piccolo" data-azione="carica-bolletta-riga">Carica foto</button>
+          <button type="button" class="btn-secondario-piccolo" data-azione="annulla-form-bolletta">Annulla</button>
+          <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-bolletta">Salva anno</button>
+        </div>
       </div>
   `;
   return involucroSezione('bolletta-bollo', 'sec-bolletta-bollo', 'Bolletta bollo', contenuto);
+}
+
+function mostraFormBolletta(id) {
+  const form = document.getElementById('form-mini-bolletta');
+  const item = id ? veicoloCorrente.bollettaBollo.find((r) => r.id === id) : null;
+  form.dataset.idEdit = id || '';
+  document.getElementById('bolletta-form-anno').value = item && item.anno != null ? item.anno : '';
+  pulisciErroriForm(form);
+  form.hidden = false;
+  form.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+/** Salva solo l'anno della voce (crea una voce senza foto se nuova, o aggiorna l'anno di una esistente). */
+function salvaRigaBolletta() {
+  const form = document.getElementById('form-mini-bolletta');
+  pulisciErroriForm(form);
+  const campoAnno = document.getElementById('bolletta-form-anno');
+  const { valido, numero } = validaNumero(campoAnno.value);
+  if (!valido) { impostaErroreCampo(campoAnno, true); mostraToast('Anno non valido', 'errore'); return; }
+
+  const idEdit = form.dataset.idEdit;
+  if (idEdit) {
+    const riga = veicoloCorrente.bollettaBollo.find((r) => r.id === idEdit);
+    if (riga) riga.anno = numero;
+  } else {
+    const nuovaRiga = { id: generaId('bolletta'), fotoId: null, anno: numero };
+    veicoloCorrente.bollettaBollo.push(nuovaRiga);
+    form.dataset.idEdit = nuovaRiga.id;
+  }
+  persistiVeicoloCorrente('Bolletta bollo salvata');
+  reRenderDettaglioPreservandoScroll();
+}
+
+function eliminaRigaBolletta(id) {
+  if (!confermaAzione('Eliminare questa voce (con la relativa foto)?')) return;
+  veicoloCorrente.bollettaBollo = veicoloCorrente.bollettaBollo.filter((r) => r.id !== id);
+  persistiVeicoloCorrente('Voce eliminata');
+  reRenderDettaglioPreservandoScroll();
 }
 
 function rimuoviLibretto() {
@@ -1162,42 +1358,74 @@ function rimuoviLibretto() {
   reRenderDettaglioPreservandoScroll();
 }
 
-function rimuoviBollettaBollo() {
-  veicoloCorrente.bollettaBollo.fotoId = null;
-  persistiVeicoloCorrente('Bolletta bollo rimossa');
+function rimuoviAttestazione() {
+  veicoloCorrente.attestazioneProprietaDigitale.fotoId = null;
+  persistiVeicoloCorrente('Attestazione rimossa');
   reRenderDettaglioPreservandoScroll();
 }
 
 function gestisciUploadLibretto(e) {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
-  if (!file) return;
-  const nuovaFoto = { id: generaId('foto'), blob: file, copertina: false };
-  veicoloCorrente.foto.push(nuovaFoto);
-  veicoloCorrente.libretto.fotoId = nuovaFoto.id;
-  persistiVeicoloCorrente('Libretto caricato', () => {
-    // Salvataggio fallito (es. QuotaExceededError): annulla la modifica ottimistica,
-    // altrimenti la UI mostrerebbe il libretto come caricato pur non essendo stato salvato.
-    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== nuovaFoto.id);
-    veicoloCorrente.libretto.fotoId = null;
-    reRenderDettaglioPreservandoScroll();
-  });
-  reRenderDettaglioPreservandoScroll();
+  gestisciUploadFotoGenerico(file,
+    (nuovoFotoId) => { veicoloCorrente.libretto.fotoId = nuovoFotoId; },
+    () => { veicoloCorrente.libretto.fotoId = null; },
+    'Libretto caricato'
+  );
+}
+
+function gestisciUploadAttestazione(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  gestisciUploadFotoGenerico(file,
+    (nuovoFotoId) => { veicoloCorrente.attestazioneProprietaDigitale.fotoId = nuovoFotoId; },
+    () => { veicoloCorrente.attestazioneProprietaDigitale.fotoId = null; },
+    'Attestazione caricata'
+  );
+}
+
+/** Id della voce bolletta bollo (o null per una nuova voce) a cui indirizzare il prossimo upload foto. */
+let idBollettaInCaricamento = null;
+
+/** Apre il selettore file per la foto di una voce bolletta bollo (esistente o nuova). */
+function avviaCaricaFotoBolletta() {
+  const form = document.getElementById('form-mini-bolletta');
+  idBollettaInCaricamento = (form && form.dataset.idEdit) || null;
+  document.getElementById('input-upload-bolletta-bollo').click();
 }
 
 function gestisciUploadBollettaBollo(e) {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  const nuovaFoto = { id: generaId('foto'), blob: file, copertina: false };
-  veicoloCorrente.foto.push(nuovaFoto);
-  veicoloCorrente.bollettaBollo.fotoId = nuovaFoto.id;
-  persistiVeicoloCorrente('Bolletta bollo caricata', () => {
-    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== nuovaFoto.id);
-    veicoloCorrente.bollettaBollo.fotoId = null;
-    reRenderDettaglioPreservandoScroll();
-  });
-  reRenderDettaglioPreservandoScroll();
+  const idTarget = idBollettaInCaricamento;
+
+  if (idTarget) {
+    gestisciUploadFotoGenerico(file,
+      (nuovoFotoId) => {
+        const riga = veicoloCorrente.bollettaBollo.find((r) => r.id === idTarget);
+        if (riga) riga.fotoId = nuovoFotoId;
+      },
+      () => {
+        const riga = veicoloCorrente.bollettaBollo.find((r) => r.id === idTarget);
+        if (riga) riga.fotoId = null;
+      },
+      'Foto bolletta caricata'
+    );
+  } else {
+    const formAnno = document.getElementById('bolletta-form-anno');
+    const annoCorrente = formAnno && formAnno.value !== '' ? Number(formAnno.value) : null;
+    const nuovoIdRiga = generaId('bolletta');
+    gestisciUploadFotoGenerico(file,
+      (nuovoFotoId) => {
+        veicoloCorrente.bollettaBollo.push({ id: nuovoIdRiga, fotoId: nuovoFotoId, anno: annoCorrente });
+      },
+      () => {
+        veicoloCorrente.bollettaBollo = veicoloCorrente.bollettaBollo.filter((r) => r.id !== nuovoIdRiga);
+      },
+      'Bolletta bollo aggiunta'
+    );
+  }
 }
 
 /* ---- Manutenzioni (5.7) ---- */
@@ -1214,6 +1442,7 @@ function generaHtmlManutenzioni(v) {
         <span>Esecutore: <strong>${escapeHtml(m.esecutore)}</strong></span>
         <span>Data: <strong>${formattaData(m.data)}</strong></span>
         <span>Costo: <strong>${m.costo != null ? formattaValuta(m.costo) : '—'}</strong></span>
+        ${m.fotoFatturaId ? '<span>Fattura: <strong>caricata</strong></span>' : ''}
       </div>
       <button type="button" class="btn-elimina-riga" data-azione="elimina-manutenzione" data-id="${m.id}" style="margin-top:4px;">Elimina ×</button>
     </div>
@@ -1258,6 +1487,13 @@ function generaHtmlManutenzioni(v) {
             <span class="errore-campo">Valore non valido</span>
           </div>
         </div>
+        <div class="campo-form">
+          <label>Foto fattura (opzionale)</label>
+          <div id="anteprima-fattura-manutenzione"></div>
+          <div class="riga-azioni-mini">
+            <button type="button" class="btn-secondario-piccolo" data-azione="carica-fattura-manutenzione">Carica foto fattura</button>
+          </div>
+        </div>
         <div class="riga-azioni-mini">
           <button type="button" class="btn-secondario-piccolo" data-azione="annulla-form-manutenzione">Annulla</button>
           <button type="button" class="btn-primario-piccolo" data-azione="salva-riga-manutenzione">Salva riga</button>
@@ -1276,9 +1512,23 @@ function mostraFormManutenzione(id) {
   document.getElementById('manutenzione-form-data').value = item ? formattaDataPerInput(item.data) : '';
   document.getElementById('manutenzione-form-tipo').value = item ? (item.tipo || '') : '';
   document.getElementById('manutenzione-form-costo').value = item && item.costo != null ? item.costo : '';
+  aggiornaAnteprimaFatturaManutenzione(item);
   pulisciErroriForm(form);
   form.hidden = false;
   form.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+/** Aggiorna l'anteprima della foto fattura nel mini-form di Manutenzioni (o un messaggio se assente). */
+function aggiornaAnteprimaFatturaManutenzione(item) {
+  const cont = document.getElementById('anteprima-fattura-manutenzione');
+  if (!cont) return;
+  const fotoId = item ? item.fotoFatturaId : null;
+  if (fotoId) {
+    cont.innerHTML = `<div class="anteprima-foto-singola">${generaHtmlAnteprimaFoto(veicoloCorrente, fotoId, 'icona-documento')}</div>`;
+    popolaAnteprimeFoto(veicoloCorrente, cont);
+  } else {
+    cont.innerHTML = '<p class="nota-anteprima" style="margin:6px 0 0;">Nessuna foto fattura caricata.</p>';
+  }
 }
 
 function salvaRigaManutenzione() {
@@ -1319,6 +1569,41 @@ function salvaRigaManutenzione() {
   }
   persistiVeicoloCorrente('Manutenzione salvata');
   reRenderDettaglioPreservandoScroll();
+}
+
+/** Id della manutenzione a cui indirizzare il prossimo upload della foto fattura. */
+let idManutenzioneInCaricamento = null;
+
+/** Apre il selettore file per la foto fattura di una manutenzione già salvata. */
+function avviaCaricaFotoFatturaManutenzione() {
+  const form = document.getElementById('form-mini-manutenzione');
+  const idEdit = (form && form.dataset.idEdit) || null;
+  if (!idEdit) {
+    mostraToast('Salva prima la manutenzione, poi carica la foto della fattura', 'info');
+    return;
+  }
+  idManutenzioneInCaricamento = idEdit;
+  document.getElementById('input-upload-fattura-manutenzione').click();
+}
+
+function gestisciUploadFatturaManutenzione(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const idTarget = idManutenzioneInCaricamento;
+  if (!idTarget) return;
+
+  gestisciUploadFotoGenerico(file,
+    (nuovoFotoId) => {
+      const riga = veicoloCorrente.manutenzioni.find((m) => m.id === idTarget);
+      if (riga) riga.fotoFatturaId = nuovoFotoId;
+    },
+    () => {
+      const riga = veicoloCorrente.manutenzioni.find((m) => m.id === idTarget);
+      if (riga) riga.fotoFatturaId = null;
+    },
+    'Foto fattura caricata'
+  );
 }
 
 /* ---- Rifornimenti (deviazione dichiarata, Sezione 11) ---- */
@@ -1426,102 +1711,40 @@ function salvaRigaRifornimento() {
   reRenderDettaglioPreservandoScroll();
 }
 
-/* ---- Foto e copertina (5.8) ---- */
-
-function generaHtmlFoto(v) {
-  const tiles = v.foto.map((f) => `
-    <div class="foto-placeholder-quadrata" data-id="${f.id}">
-      <svg aria-hidden="true"><use href="#icona-foto"></use></svg>
-      ${f.copertina ? '<span class="etichetta-copertina">Copertina</span>' : ''}
-    </div>
-  `).join('');
-
-  const contenuto = `
-      <div class="griglia-foto" id="griglia-foto-veicolo">
-        <div class="foto-placeholder-quadrata tile-aggiungi" data-azione="apri-upload-foto" aria-label="Aggiungi foto">+</div>
-        ${tiles}
-      </div>
-      <p class="nota-anteprima" style="margin-top:10px;">Tocca a lungo una foto per impostarla come copertina o rimuoverla.</p>
-  `;
-  return involucroSezione('foto', 'sezione-foto', 'Foto', contenuto);
-}
-
-/** Dopo il render, inserisce le miniature reali (Blob→object URL) e abilita il tap lungo. */
-function popolaMiniatureFoto(v) {
-  const cont = document.getElementById('griglia-foto-veicolo');
-  if (!cont) return;
-  v.foto.forEach((f) => {
-    if (!f.blob) return;
-    const item = cont.querySelector(`[data-id="${f.id}"]`);
-    if (!item) return;
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(f.blob);
-    item.insertBefore(img, item.firstChild);
-  });
-  cont.querySelectorAll('.foto-placeholder-quadrata[data-id]').forEach((item) => {
-    const fotoId = item.dataset.id;
-    abilitaPressioneLunga(item, () => apriMenuFoto(fotoId), () => {});
-  });
-}
-
-/** Apre il menu contestuale per una foto della galleria (copertina / rimozione). */
-function apriMenuFoto(fotoId) {
-  const overlay = document.getElementById('overlay-menu-contestuale');
-  const foglio = document.getElementById('foglio-menu-contestuale');
-  foglio.innerHTML = `
-    <p class="titolo-foglio">Foto</p>
-    <button type="button" class="voce-menu" data-menu-azione-foto="copertina">Imposta come copertina</button>
-    <button type="button" class="voce-menu pericolo" data-menu-azione-foto="rimuovi">Rimuovi foto</button>
-  `;
-  overlay.hidden = false;
-  foglio.querySelectorAll('button[data-menu-azione-foto]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const azione = btn.dataset.menuAzioneFoto;
-      chiudiMenuContestuale();
-      if (azione === 'copertina') impostaCopertina(fotoId);
-      else if (azione === 'rimuovi') rimuoviFoto(fotoId);
-    });
-  });
-}
-
-/** Imposta una foto come copertina, azzerando il flag su tutte le altre. */
-function impostaCopertina(fotoId) {
-  veicoloCorrente.foto.forEach((f) => { f.copertina = f.id === fotoId; });
-  persistiVeicoloCorrente('Copertina aggiornata');
-  reRenderDettaglioPreservandoScroll();
-}
-
-/** Rimuove una foto dalla galleria e scollega eventuali riferimenti libretto/bolletta. */
-function rimuoviFoto(fotoId) {
-  if (!confermaAzione('Rimuovere questa foto?')) return;
-  veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => f.id !== fotoId);
-  if (veicoloCorrente.libretto.fotoId === fotoId) veicoloCorrente.libretto.fotoId = null;
-  if (veicoloCorrente.bollettaBollo.fotoId === fotoId) veicoloCorrente.bollettaBollo.fotoId = null;
-  persistiVeicoloCorrente('Foto rimossa');
-  reRenderDettaglioPreservandoScroll();
-}
+/* ---- Foto veicolo (fotoAuto — copertina Home, Fase 6) ---- */
 
 /**
- * Gestisce la selezione di uno o più file dalla galleria generale foto[].
- * Se il salvataggio su DB fallisce (es. QuotaExceededError), le foto appena
- * aggiunte vengono rimosse di nuovo dalla UI: senza questo rollback la scheda
- * mostrerebbe le foto come caricate anche quando in realtà non sono state
- * persistite, dando l'impressione errata che l'upload sia riuscito (bug segnalato
- * dall'utente — causa identificata: render ottimistico + errore silenziosamente
- * "perso" nel toast, vedi indagine in Sezione 8/Fase 6).
+ * Sezione con la SINGOLA foto usata come copertina nella card Home (sostituisce la
+ * vecchia galleria generica con selezione copertina). Se vuota, la Home mostra il
+ * placeholder generico (già previsto in creaCardVeicolo).
  */
-function gestisciUploadFoto(e) {
-  const files = e.target.files;
-  e.target.value = '';
-  if (!files || files.length === 0) return;
-  const nuoveFoto = Array.from(files).map((file) => ({ id: generaId('foto'), blob: file, copertina: false }));
-  nuoveFoto.forEach((f) => veicoloCorrente.foto.push(f));
-  persistiVeicoloCorrente(nuoveFoto.length > 1 ? 'Foto caricate' : 'Foto caricata', () => {
-    const idNuoveFoto = new Set(nuoveFoto.map((f) => f.id));
-    veicoloCorrente.foto = veicoloCorrente.foto.filter((f) => !idNuoveFoto.has(f.id));
-    reRenderDettaglioPreservandoScroll();
-  });
+function generaHtmlFotoAuto(v) {
+  const foto = trovaFoto(v, v.fotoAuto.fotoId);
+  const contenuto = `
+      <div class="anteprima-foto-singola">${generaHtmlAnteprimaFoto(v, v.fotoAuto.fotoId, 'icona-foto')}</div>
+      <div class="riga-azioni-mini">
+        <button type="button" class="btn-secondario-piccolo" data-azione="carica-foto-auto">${foto ? 'Sostituisci foto' : 'Carica foto'}</button>
+        ${foto ? '<button type="button" class="btn-secondario-piccolo" data-azione="rimuovi-foto-auto">Rimuovi</button>' : ''}
+      </div>
+      <p class="nota-anteprima" style="margin-top:10px;">Questa foto è usata come copertina della scheda in Home.</p>
+  `;
+  return involucroSezione('foto-auto', 'sezione-foto', 'Foto veicolo', contenuto);
+}
+
+function rimuoviFotoAuto() {
+  veicoloCorrente.fotoAuto.fotoId = null;
+  persistiVeicoloCorrente('Foto veicolo rimossa');
   reRenderDettaglioPreservandoScroll();
+}
+
+function gestisciUploadFotoAuto(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  gestisciUploadFotoGenerico(file,
+    (nuovoFotoId) => { veicoloCorrente.fotoAuto.fotoId = nuovoFotoId; },
+    () => { veicoloCorrente.fotoAuto.fotoId = null; },
+    'Foto veicolo caricata'
+  );
 }
 
 /* ---- Note ---- */
@@ -1588,14 +1811,23 @@ function gestisciClickDettaglio(event) {
 
     case 'carica-libretto': document.getElementById('input-upload-libretto').click(); break;
     case 'rimuovi-libretto': rimuoviLibretto(); break;
-    case 'carica-bolletta': document.getElementById('input-upload-bolletta-bollo').click(); break;
-    case 'rimuovi-bolletta': rimuoviBollettaBollo(); break;
+
+    case 'carica-attestazione': document.getElementById('input-upload-attestazione').click(); break;
+    case 'rimuovi-attestazione': rimuoviAttestazione(); break;
+
+    case 'mostra-form-bolletta': mostraFormBolletta(null); break;
+    case 'annulla-form-bolletta': nascondiForm('form-mini-bolletta'); break;
+    case 'modifica-bolletta': mostraFormBolletta(el.dataset.id); break;
+    case 'elimina-bolletta': eliminaRigaBolletta(el.dataset.id); break;
+    case 'salva-riga-bolletta': salvaRigaBolletta(); break;
+    case 'carica-bolletta-riga': avviaCaricaFotoBolletta(); break;
 
     case 'mostra-form-manutenzione': mostraFormManutenzione(null); break;
     case 'annulla-form-manutenzione': nascondiForm('form-mini-manutenzione'); break;
     case 'modifica-manutenzione': mostraFormManutenzione(el.dataset.id); break;
     case 'elimina-manutenzione': eliminaRigaConId('manutenzioni', el.dataset.id, 'Manutenzione eliminata'); break;
     case 'salva-riga-manutenzione': salvaRigaManutenzione(); break;
+    case 'carica-fattura-manutenzione': avviaCaricaFotoFatturaManutenzione(); break;
 
     case 'mostra-form-rifornimento': mostraFormRifornimento(null); break;
     case 'annulla-form-rifornimento': nascondiForm('form-mini-rifornimento'); break;
@@ -1605,7 +1837,8 @@ function gestisciClickDettaglio(event) {
 
     case 'salva-note': salvaSezioneNote(); break;
 
-    case 'apri-upload-foto': document.getElementById('input-upload-foto').click(); break;
+    case 'carica-foto-auto': document.getElementById('input-upload-foto-auto').click(); break;
+    case 'rimuovi-foto-auto': rimuoviFotoAuto(); break;
 
     case 'toggla-sezione': {
       const idSezione = el.dataset.sezioneId;
@@ -1967,6 +2200,7 @@ function generaEScaricaPdf(v) {
     scriviRiga('Targa', v.targa);
     scriviRiga('Numero di telaio', v.numeroTelaio);
     scriviRiga('Prima immatricolazione', v.annoPrimaImmatricolazione);
+    scriviRiga('Foto veicolo', trovaFoto(v, v.fotoAuto.fotoId) ? 'Presente' : 'Non caricata');
     spazio(3);
 
     scriviTitolo('Chilometraggio');
@@ -2004,8 +2238,15 @@ function generaEScaricaPdf(v) {
     scriviRiga('Documento', trovaFoto(v, v.libretto.fotoId) ? 'Foto caricata' : 'Non caricato');
     spazio(3);
 
+    scriviTitolo('Attestazione di Proprietà Digitale');
+    scriviRiga('Documento', trovaFoto(v, v.attestazioneProprietaDigitale.fotoId) ? 'Foto caricata' : 'Non caricato');
+    spazio(3);
+
     scriviTitolo('Bolletta bollo');
-    scriviRiga('Documento', trovaFoto(v, v.bollettaBollo.fotoId) ? 'Foto caricata' : 'Non caricato');
+    if ((v.bollettaBollo || []).length === 0) scriviRiga(null, 'Nessuna bolletta caricata.');
+    [...(v.bollettaBollo || [])].sort((a, b) => (b.anno ?? -Infinity) - (a.anno ?? -Infinity)).forEach((r) => {
+      scriviRiga(r.anno != null ? `Anno ${r.anno}` : 'Anno non specificato', trovaFoto(v, r.fotoId) ? 'Foto caricata' : 'Non caricata');
+    });
     spazio(3);
 
     scriviTitolo('Manutenzioni');
@@ -2086,9 +2327,11 @@ function inizializzaGestoriGlobali() {
   document.getElementById('dettaglio-contenuto').addEventListener('input', () => { formSporco = true; });
   document.getElementById('dettaglio-contenuto').addEventListener('change', () => { formSporco = true; });
 
-  document.getElementById('input-upload-foto').addEventListener('change', gestisciUploadFoto);
+  document.getElementById('input-upload-foto-auto').addEventListener('change', gestisciUploadFotoAuto);
   document.getElementById('input-upload-libretto').addEventListener('change', gestisciUploadLibretto);
+  document.getElementById('input-upload-attestazione').addEventListener('change', gestisciUploadAttestazione);
   document.getElementById('input-upload-bolletta-bollo').addEventListener('change', gestisciUploadBollettaBollo);
+  document.getElementById('input-upload-fattura-manutenzione').addEventListener('change', gestisciUploadFatturaManutenzione);
   document.getElementById('input-ripristino-backup').addEventListener('change', gestisciFileRipristino);
 
   document.getElementById('btn-backup').addEventListener('click', gestisciBackup);
